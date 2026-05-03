@@ -1,5 +1,3 @@
-import React from "react";
-
 interface StatusBarProps {
   wsStatus: string;
   lastQuestion: string;

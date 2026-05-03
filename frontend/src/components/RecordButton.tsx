@@ -1,5 +1,3 @@
-import React from "react";
-
 interface RecordButtonProps {
   isListening: boolean;
   disabled: boolean;

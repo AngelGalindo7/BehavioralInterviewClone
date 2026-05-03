@@ -1,9 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AvatarView from "./components/AvatarView";
 import RecordButton from "./components/RecordButton";
 import StatusBar from "./components/StatusBar";
 import { destroyAvatar, initSimliAvatar, interruptAvatar, sendAudioToAvatar } from "./lib/simliAvatar";
-import { isSpeechRecognitionSupported, startSpeechRecognition } from "./lib/speechRecognition";
+import {
+  isSpeechRecognitionSupported,
+  startSpeechRecognition,
+  type SpeechRecognition,
+} from "./lib/speechRecognition";
 import { InterviewWebSocket } from "./lib/wsClient";
 
 export default function App() {
