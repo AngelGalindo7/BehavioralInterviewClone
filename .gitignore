@@ -13,14 +13,30 @@ env/
 
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
 # Secrets / sensitive data
 ingestion/anecdotes/*.txt
 ingestion/anecdotes/*.md
 ingestion/anecdotes/*.pdf
 infra/systemd/behavioral-dummy-env
+*.pem
+*.key
+*.crt
+*.pfx
+id_rsa
+id_rsa.*
+.aws/
+credentials
+docker-compose.override.yml
+
+# Database dumps
+*.sql.gz
+*.dump
+*.sqlite
+*.db
 
 # Testing
 .pytest_cache/
