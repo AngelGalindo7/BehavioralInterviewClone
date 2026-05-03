@@ -1,0 +1,35 @@
+# Copy this to behavioral-dummy-env (no .example suffix) and fill in secrets.
+# This file is NEVER committed to git.
+
+# jemalloc — prevents memory fragmentation during PCM audio streaming.
+# Path for Ubuntu 24.04 ARM (Graviton2). Verify with:
+#   ldconfig -p | grep libjemalloc
+LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libjemalloc.so.2
+
+# Database — single-user: point directly at RDS instance endpoint (no proxy needed).
+# These pool values override config.py defaults (5/3) — 2 workers × (2+1) = 6 connections,
+# well within db.t3.micro's ~110 max_connections limit.
+DATABASE_URL=postgresql+asyncpg://bduser:CHANGE_ME@your-rds-instance.us-west-2.rds.amazonaws.com:5432/behavioral_dummy
+DB_POOL_SIZE=2
+DB_MAX_OVERFLOW=1
+DB_POOL_TIMEOUT=30
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_RESPONSE_MODEL=gpt-4o-mini
+
+# ElevenLabs
+ELEVENLABS_API_KEY=...
+ELEVENLABS_VOICE_ID=...
+ELEVENLABS_MODEL_ID=eleven_turbo_v2_5
+ELEVENLABS_OUTPUT_FORMAT=pcm_16000
+
+# Simli
+SIMLI_API_KEY=...
+SIMLI_FACE_ID=...
+SIMLI_IS_TRINITY=true
+
+# App
+CANDIDATE_NAME=Angel
+LOG_LEVEL=INFO
+ENVIRONMENT=production

@@ -1,0 +1,31 @@
+version: "3.9"
+
+# Main application stack. Observability (Loki/Promtail/Grafana) lives in
+# observability/docker-compose.yml and runs independently.
+#
+# Env vars (API keys, DATABASE_URL, LD_PRELOAD) are loaded from the
+# secrets file that is NEVER committed to git:
+#   infra/systemd/behavioral-dummy-env
+# Copy infra/systemd/behavioral-dummy-env.example to get started.
+
+services:
+  app:
+    image: behavioral-dummy:latest
+    container_name: behavioral-dummy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - ./infra/systemd/behavioral-dummy-env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # journald keeps container logs in the systemd journal, where Promtail
+    # scrapes them into Loki with the same pipeline as the old systemd service.
+    logging:
+      driver: journald
+      options:
+        tag: behavioral-dummy

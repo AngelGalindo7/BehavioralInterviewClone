@@ -1,0 +1,35 @@
+[Unit]
+Description=BehavioralDummy FastAPI Application
+Documentation=https://github.com/YOUR_ORG/behavioral-dummy
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/MasterTheBehavioralInterview
+
+# Secrets and jemalloc LD_PRELOAD live here (not in the git-tracked .env)
+EnvironmentFile=/home/ubuntu/MasterTheBehavioralInterview/infra/systemd/behavioral-dummy-env
+
+ExecStart=/home/ubuntu/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --loop uvloop \
+    --http httptools \
+    --log-level info \
+    --access-log
+
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=behavioral-dummy
+
+# Prevent OOM killer from targeting this process first
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
