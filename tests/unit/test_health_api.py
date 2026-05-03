@@ -1,7 +1,6 @@
 """Unit tests for GET /health and GET /ready endpoints."""
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app

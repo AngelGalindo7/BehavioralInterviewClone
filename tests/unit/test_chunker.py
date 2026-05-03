@@ -1,5 +1,4 @@
 """Unit tests for the PCM audio chunker."""
-import pytest
 from app.audio.chunker import iter_pcm_chunks
 
 

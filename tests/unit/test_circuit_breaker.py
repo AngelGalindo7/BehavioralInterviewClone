@@ -55,7 +55,6 @@ async def test_open_raises_circuit_open_error():
 
 @pytest.mark.asyncio
 async def test_recovers_after_timeout(monkeypatch):
-    import time
     cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=0.01)
 
     async def _fail():
