@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Secrets / sensitive data
+ingestion/anecdotes/*.txt
+ingestion/anecdotes/*.md
+ingestion/anecdotes/*.pdf
+infra/systemd/behavioral-dummy-env
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+loki-data/
+grafana-data/
+
+# Frontend build
+frontend/dist/
+frontend/node_modules/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Alembic
+app/db/migrations/versions/*.pyc
+
+# Dev-only references — never staged (per CLAUDE.md)
+CLAUDE.md
+PROJECT_MAP.md
+docs/

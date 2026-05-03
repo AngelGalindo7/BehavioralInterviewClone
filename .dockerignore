@@ -1,0 +1,14 @@
+.venv/
+.git/
+.github/
+frontend/
+tests/
+ingestion/anecdotes/
+observability/
+docs/
+infra/
+*.md
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.env*
