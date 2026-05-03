@@ -1,0 +1,34 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: behavioral-dummy
+    journal:
+      max_age: 12h
+      labels:
+        job: behavioral-dummy
+        host: ec2-arm
+    pipeline_stages:
+      # Parse structlog JSON lines emitted by FastAPI
+      - json:
+          expressions:
+            level: level
+            ttfb_ms: ttfb_ms
+            session_id: session_id
+            event: event
+      # Promote extracted fields to Loki stream labels
+      # (Loki indexes labels, not field values — keep label cardinality low)
+      - labels:
+          level:
+      # Drop DEBUG lines in production to control storage growth
+      - match:
+          selector: '{level="debug"}'
+          action: drop
+          drop_counter_reason: debug_filtered

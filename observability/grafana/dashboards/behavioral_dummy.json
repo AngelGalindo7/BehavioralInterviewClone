@@ -1,0 +1,85 @@
+{
+  "title": "BehavioralDummy",
+  "uid": "behavioral-dummy",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "TTFB (ms) — p50 / p95 / p99",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "quantile_over_time(0.50, {job=\"behavioral-dummy\"} | json | ttfb_ms != \"\" | unwrap ttfb_ms [5m]) by ()",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | ttfb_ms != \"\" | unwrap ttfb_ms [5m]) by ()",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "quantile_over_time(0.99, {job=\"behavioral-dummy\"} | json | ttfb_ms != \"\" | unwrap ttfb_ms [5m]) by ()",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "thresholds": { "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 800 },
+          { "color": "red", "value": 1200 }
+        ]}}
+      }
+    },
+    {
+      "id": 2,
+      "title": "Circuit Breaker Events",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "{job=\"behavioral-dummy\"} | json | event =~ \"circuit_.*\""
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Active WebSocket Sessions (log-based)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"behavioral-dummy\"} | json | event=\"ws_connected\" [1h])) - sum(count_over_time({job=\"behavioral-dummy\"} | json | event=\"ws_disconnected\" [1h]))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "ElevenLabs History Deletions",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "count_over_time({job=\"behavioral-dummy\"} | json | event=\"tts_history_deleted\" [1h])"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Errors",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "{job=\"behavioral-dummy\", level=\"error\"}"
+        }
+      ]
+    }
+  ]
+}
