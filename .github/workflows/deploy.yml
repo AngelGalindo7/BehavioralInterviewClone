@@ -1,0 +1,117 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Queue deploys rather than cancelling an in-flight one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+# id-token:write lets this workflow request a GitHub OIDC JWT.
+# contents:read is required for actions/checkout.
+# No other permissions are granted.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ── 1. Gate: unit tests must pass before any deploy step runs ─────────────────
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+      OPENAI_API_KEY: sk-test
+      ELEVENLABS_API_KEY: el-test
+      ELEVENLABS_VOICE_ID: voice-test
+      SIMLI_API_KEY: simli-test
+      SIMLI_FACE_ID: face-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt --quiet
+      - run: python -m pytest tests/unit/ -v --tb=short
+
+  # ── 2. Deploy ─────────────────────────────────────────────────────────────────
+  # Runs in the "production" GitHub Environment. The IAM role trust policy is
+  # scoped to this environment — jobs from forks or other branches cannot
+  # assume the role even if they modify this workflow file.
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      # Exchange the GitHub OIDC JWT for short-lived AWS credentials.
+      # No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY stored anywhere.
+      # Credentials are minted per job and expire when the job finishes.
+      - name: Authenticate to AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.IAM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+
+      # Trigger deploy.sh on the EC2 instance via SSM Run Command.
+      # Port 22 never needs to be open. No SSH key stored in GitHub.
+      # The IAM policy restricts this action to the single instance in
+      # vars.EC2_INSTANCE_ID — the role cannot touch any other resource.
+      - name: Send deploy command via SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["bash /home/ubuntu/MasterTheBehavioralInterview/infra/scripts/deploy.sh"]' \
+            --timeout-seconds 1200 \
+            --region "${{ vars.AWS_REGION }}" \
+            --output text \
+            --query "Command.CommandId")
+          echo "SSM Command ID: $COMMAND_ID"
+          echo "COMMAND_ID=$COMMAND_ID" >> "$GITHUB_ENV"
+
+      # Poll until the command succeeds or fails. Full stdout is printed on
+      # success and stderr on failure, so the log is self-contained.
+      - name: Wait for deploy to complete
+        run: |
+          for i in $(seq 1 72); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+              --region "${{ vars.AWS_REGION }}" \
+              --query "Status" \
+              --output text 2>/dev/null || echo "Pending")
+
+            echo "[$i/72] $STATUS"
+
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+                  --region "${{ vars.AWS_REGION }}" \
+                  --query "StandardOutputContent" \
+                  --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|DeliveryTimedOut|ExecutionTimedOut)
+                echo "ERROR: deploy failed ($STATUS). stderr:"
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+                  --region "${{ vars.AWS_REGION }}" \
+                  --query "StandardErrorContent" \
+                  --output text
+                exit 1
+                ;;
+              *)
+                sleep 10
+                ;;
+            esac
+          done
+          echo "ERROR: timed out after 12 minutes waiting for SSM command."
+          exit 1
