@@ -21,12 +21,12 @@ from dotenv import load_dotenv  # type: ignore[import-untyped]
 
 load_dotenv()
 
-from sqlalchemy import text
+from sqlalchemy import text  # noqa: E402
 
-from app.db.engine import AsyncSessionLocal, engine
-from app.db.models import Anecdote
-from ingestion.chunker import load_and_chunk
-from ingestion.embedder import batch_embed
+from app.db.engine import AsyncSessionLocal, engine  # noqa: E402
+from app.db.models import Anecdote  # noqa: E402
+from ingestion.chunker import load_and_chunk  # noqa: E402
+from ingestion.embedder import batch_embed  # noqa: E402
 
 
 async def bulk_insert(
