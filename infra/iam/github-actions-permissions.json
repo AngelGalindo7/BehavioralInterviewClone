@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SSMSendCommand",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ssm:YOUR_REGION:YOUR_ACCOUNT_ID:document/AWS-RunShellScript",
+        "arn:aws:ec2:YOUR_REGION:YOUR_ACCOUNT_ID:instance/YOUR_EC2_INSTANCE_ID"
+      ]
+    },
+    {
+      "Sid": "SSMPollResult",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
