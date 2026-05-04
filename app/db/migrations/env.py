@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -10,6 +11,7 @@ from app.db.engine import Base
 from app.db import models  # noqa: F401 — registers all ORM models with Base.metadata
 
 config = context.config
+config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
