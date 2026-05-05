@@ -5,26 +5,23 @@ interface StatusBarProps {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  connected: "#10b981",
-  reconnecting: "#fbbf24",
-  disconnected: "#f43f5e",
+  connected: "#4ade80",
+  reconnecting: "#f5a524",
+  disconnected: "#e5484d",
 };
 
 export default function StatusBar({ wsStatus, lastQuestion, isListening }: StatusBarProps) {
-  const dot = STATUS_COLOR[wsStatus] ?? "#6b7280";
-  const isConnected = wsStatus === "connected";
+  const dot = STATUS_COLOR[wsStatus] ?? "var(--text-muted)";
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span className="pill" style={{ textTransform: "capitalize" }}>
           <span
-            className={isConnected ? "pulse-dot" : ""}
             style={{
-              width: 8,
-              height: 8,
+              width: 7,
+              height: 7,
               borderRadius: "50%",
               background: dot,
-              boxShadow: `0 0 8px ${dot}`,
               display: "inline-block",
             }}
           />
@@ -34,19 +31,18 @@ export default function StatusBar({ wsStatus, lastQuestion, isListening }: Statu
           <span
             className="pill fade-in"
             style={{
-              color: "#fecaca",
-              borderColor: "rgba(244, 63, 94, 0.40)",
-              background: "rgba(244, 63, 94, 0.10)",
+              color: "#fca5a5",
+              borderColor: "rgba(229, 72, 77, 0.30)",
+              background: "rgba(229, 72, 77, 0.06)",
             }}
           >
             <span
               className="pulse-dot"
               style={{
-                width: 7,
-                height: 7,
+                width: 6,
+                height: 6,
                 borderRadius: "50%",
-                background: "#f43f5e",
-                boxShadow: "0 0 8px #f43f5e",
+                background: "var(--danger)",
                 display: "inline-block",
               }}
             />
@@ -58,10 +54,9 @@ export default function StatusBar({ wsStatus, lastQuestion, isListening }: Statu
         <div
           className="fade-in"
           style={{
-            fontStyle: "italic",
             color: "var(--text-muted)",
             fontSize: 12,
-            maxWidth: 360,
+            maxWidth: 320,
             textAlign: "right",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -69,7 +64,7 @@ export default function StatusBar({ wsStatus, lastQuestion, isListening }: Statu
           }}
           title={lastQuestion}
         >
-          “{lastQuestion}”
+          {lastQuestion}
         </div>
       )}
     </div>
