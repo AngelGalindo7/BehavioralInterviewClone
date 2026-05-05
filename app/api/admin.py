@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import engine
 from app.db.models import Anecdote
 from app.deps import get_db
-from app.rag.embedder import embed_text
+from app.rag.embedder import embed_texts
 from ingestion.chunker import chunk_text
 
 router = APIRouter()
@@ -84,16 +84,18 @@ async def upsert_anecdote(
 
     await db.execute(delete(Anecdote).where(Anecdote.source_file == source_file))
 
-    rows: list[Anecdote] = []
-    for chunk in chunks:
-        try:
-            embedding = await embed_text(chunk)
-        except Exception as exc:  # noqa: BLE001 — surface upstream errors as 502
-            raise HTTPException(
-                status_code=502,
-                detail=f"Embedding API error: {exc}",
-            ) from exc
-        rows.append(Anecdote(content=chunk, source_file=source_file, embedding=embedding))
+    try:
+        embeddings = await embed_texts(chunks)
+    except Exception as exc:  # noqa: BLE001 — surface upstream errors as 502
+        raise HTTPException(
+            status_code=502,
+            detail=f"Embedding API error: {exc}",
+        ) from exc
+
+    rows = [
+        Anecdote(content=chunk, source_file=source_file, embedding=embedding)
+        for chunk, embedding in zip(chunks, embeddings)
+    ]
 
     db.add_all(rows)
     await db.commit()
