@@ -13,6 +13,8 @@ import { InterviewWebSocket } from "../lib/wsClient";
 export default function InterviewPage() {
   const [started, setStarted] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmingStop, setConfirmingStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [isListening, setIsListening] = useState(false);
@@ -117,6 +119,43 @@ export default function InterviewPage() {
     interruptAvatar();
     wsRef.current?.sendSkip();
   }, []);
+
+  const handleEndSession = useCallback(async () => {
+    if (stopping) return;
+    setStopping(true);
+
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    try {
+      recognition?.abort();
+    } catch {
+      // recognition may already be stopped
+    }
+
+    const ws = wsRef.current;
+    wsRef.current = null;
+    ws?.close();
+
+    await destroyAvatar();
+
+    const idToEnd = sessionId;
+    if (idToEnd) {
+      void fetch(`/session/${idToEnd}`, { method: "DELETE" }).catch((err) => {
+        console.warn("DELETE /session failed:", err);
+      });
+    }
+
+    setSessionId(null);
+    setWsStatus("disconnected");
+    setIsListening(false);
+    setAvatarReady(false);
+    setLastQuestion("");
+    setInterimText("");
+    setConfirmingStop(false);
+    setConfirming(false);
+    setStarted(false);
+    setStopping(false);
+  }, [sessionId, stopping]);
 
   if (error) {
     return (
@@ -256,6 +295,80 @@ export default function InterviewPage() {
       />
 
       {!sessionId && <p style={{ color: "#6b7280", fontSize: 13 }}>Initialising session…</p>}
+
+      {!confirmingStop ? (
+        <button
+          onClick={() => setConfirmingStop(true)}
+          disabled={stopping}
+          style={{
+            padding: "8px 18px",
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#fca5a5",
+            background: "transparent",
+            border: "1px solid #7f1d1d",
+            borderRadius: 6,
+            cursor: stopping ? "not-allowed" : "pointer",
+            opacity: stopping ? 0.6 : 1,
+          }}
+        >
+          End session
+        </button>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 10,
+            padding: 16,
+            border: "1px solid #7f1d1d",
+            borderRadius: 10,
+            background: "#1f1011",
+            maxWidth: 420,
+          }}
+        >
+          <p style={{ color: "#fca5a5", fontSize: 13, margin: 0, textAlign: "center" }}>
+            End the session? This will release the Simli avatar slot and close the pipeline.
+            Restarting will charge a new token.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={() => void handleEndSession()}
+              disabled={stopping}
+              style={{
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#fff",
+                background: "#dc2626",
+                border: "none",
+                borderRadius: 6,
+                cursor: stopping ? "not-allowed" : "pointer",
+                opacity: stopping ? 0.6 : 1,
+              }}
+            >
+              {stopping ? "Ending…" : "Yes, end session"}
+            </button>
+            <button
+              onClick={() => setConfirmingStop(false)}
+              disabled={stopping}
+              style={{
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#e5e7eb",
+                background: "transparent",
+                border: "1px solid #4b5563",
+                borderRadius: 6,
+                cursor: stopping ? "not-allowed" : "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <a href="/admin" style={{ color: "#6b7280", fontSize: 12 }}>
         Manage stories →
