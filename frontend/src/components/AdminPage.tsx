@@ -51,6 +51,7 @@ export default function AdminPage() {
     if (!confirm(`Delete ${sourceFile}?`)) return;
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
       await deleteAnecdote(sourceFile);
       await refresh();
