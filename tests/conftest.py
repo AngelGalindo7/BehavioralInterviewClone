@@ -18,6 +18,16 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-min-32-chars-long")
 
 
 @pytest.fixture
+def auth_cookies() -> dict[str, str]:
+    """Real signed-session cookie so requests pass AccessPasscodeMiddleware.
+    Imported lazily — depends on env vars set above being present at import time."""
+    from app.config import settings
+    from app.core.auth import issue_token
+
+    return {settings.auth_cookie_name: issue_token()}
+
+
+@pytest.fixture
 def lifespan_mocks():
     """Patch both startup DB checks so TestClient can run without a live database.
 
