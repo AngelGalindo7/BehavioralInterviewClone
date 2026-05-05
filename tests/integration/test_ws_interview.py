@@ -37,7 +37,7 @@ def fake_anecdotes() -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_transcript_produces_immediate_prefixed_binary_frames(fake_embedding, fake_anecdotes):
+async def test_transcript_produces_immediate_prefixed_binary_frames(fake_embedding, fake_anecdotes, auth_cookies):
     """
     First binary frame after a transcript must carry the 0x01 immediate prefix
     so the frontend dispatches it via simliClient.sendAudioDataImmediate().
@@ -70,7 +70,7 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(fake_embeddi
         from app.main import create_app
         app = create_app()
 
-        with TestClient(app) as client:
+        with TestClient(app, cookies=auth_cookies) as client:
             session_id = str(uuid.uuid4())
             received_binary: list[bytes] = []
 
@@ -91,7 +91,7 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(fake_embeddi
 
 
 @pytest.mark.asyncio
-async def test_skip_message_is_accepted_silently():
+async def test_skip_message_is_accepted_silently(auth_cookies):
     """
     Backend now logs and discards skip — the frontend handles the avatar-buffer
     clear locally via simliClient.ClearBuffer(). No bytes should come back.
@@ -103,7 +103,7 @@ async def test_skip_message_is_accepted_silently():
         from app.main import create_app
         app = create_app()
 
-        with TestClient(app) as client:
+        with TestClient(app, cookies=auth_cookies) as client:
             session_id = str(uuid.uuid4())
             with client.websocket_connect(f"/ws/interview?session_id={session_id}") as ws:
                 ws.send_text(json.dumps({"type": "skip"}))
@@ -116,7 +116,7 @@ async def test_skip_message_is_accepted_silently():
 
 
 @pytest.mark.asyncio
-async def test_oversized_text_frame_is_dropped():
+async def test_oversized_text_frame_is_dropped(auth_cookies):
     """
     A text frame larger than max_ws_text_frame_bytes must be ignored — no JSON
     parsing, no LLM call, no binary response. Protects against memory abuse.
@@ -130,7 +130,7 @@ async def test_oversized_text_frame_is_dropped():
         from app.main import create_app
         app = create_app()
 
-        with TestClient(app) as client:
+        with TestClient(app, cookies=auth_cookies) as client:
             session_id = str(uuid.uuid4())
             with client.websocket_connect(f"/ws/interview?session_id={session_id}") as ws:
                 oversized = json.dumps({"type": "transcript", "text": "x" * (settings.max_ws_text_frame_bytes + 1)})
