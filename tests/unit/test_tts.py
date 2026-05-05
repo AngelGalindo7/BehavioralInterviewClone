@@ -1,11 +1,16 @@
 """Unit tests for ElevenLabs TTS streaming and history deletion worker."""
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import app.audio.tts as tts_module
-from app.audio.tts import history_delete_worker, stream_tts_pcm
+from app.audio.tts import (
+    LATEST_HISTORY_SENTINEL,
+    history_delete_worker,
+    stream_tts_pcm,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -128,12 +133,82 @@ async def test_stream_tts_pcm_enqueues_only_first_history_id():
 
 
 @pytest.mark.asyncio
-async def test_stream_tts_pcm_does_not_enqueue_when_no_history_id():
+async def test_stream_tts_pcm_enqueues_latest_sentinel_when_no_alignment():
+    """
+    SDK chunks may not surface alignment.history_item_id depending on the
+    elevenlabs package version. On a normal completion without an ID, enqueue
+    the LATEST sentinel so the worker can fall back to /v1/history's most
+    recent item.
+    """
     queue: asyncio.Queue[str] = asyncio.Queue()
     mock_client = _make_elevenlabs_mock(b"\x00\x01")
 
     with patch("app.audio.tts.AsyncElevenLabs", return_value=mock_client):
         _ = [c async for c in stream_tts_pcm("hello", queue)]
+
+    assert await queue.get() == LATEST_HISTORY_SENTINEL
+
+
+@pytest.mark.asyncio
+async def test_stream_tts_pcm_enqueues_history_id_on_cancellation():
+    """
+    The captured history_item_id must be enqueued even when the consumer
+    cancels mid-stream — without this the synthesis row leaks into ElevenLabs
+    Creator-tier history (~2-year retention).
+    """
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    blocker = asyncio.Event()
+
+    async def _slow_stream(**_kwargs):
+        yield _AlignmentChunk(b"\x00", history_item_id="captured-id")
+        await blocker.wait()  # never set; we cancel the consumer instead
+        yield _AlignmentChunk(b"\x01", history_item_id="captured-id")
+
+    mock_client = MagicMock()
+    mock_client.text_to_speech.convert_as_stream = _slow_stream
+
+    with patch("app.audio.tts.AsyncElevenLabs", return_value=mock_client):
+        async def _consume():
+            async for _ in stream_tts_pcm("hello", queue):
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert await queue.get() == "captured-id"
+
+
+@pytest.mark.asyncio
+async def test_stream_tts_pcm_skips_latest_sentinel_on_cancellation():
+    """
+    On cancellation without a captured ID, do NOT enqueue the LATEST fallback —
+    a previous turn's history item could be deleted instead. Cancel-without-ID
+    accepts a small leakage risk to avoid worse data loss.
+    """
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    blocker = asyncio.Event()
+
+    async def _slow_stream(**_kwargs):
+        yield b"\x00"  # no alignment
+        await blocker.wait()
+        yield b"\x01"
+
+    mock_client = MagicMock()
+    mock_client.text_to_speech.convert_as_stream = _slow_stream
+
+    with patch("app.audio.tts.AsyncElevenLabs", return_value=mock_client):
+        async def _consume():
+            async for _ in stream_tts_pcm("hello", queue):
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     assert queue.empty()
 
@@ -177,6 +252,52 @@ async def test_history_delete_worker_processes_multiple_items():
             pass
 
     assert mock_client.history.delete.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_history_delete_worker_resolves_latest_sentinel_via_get_all():
+    """
+    A LATEST sentinel triggers history.get_all(page_size=1) and the resolved
+    last_history_item_id is the one passed to history.delete.
+    """
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    await queue.put(LATEST_HISTORY_SENTINEL)
+
+    mock_client = AsyncMock()
+    mock_client.history.get_all.return_value = MagicMock(last_history_item_id="resolved-id")
+
+    with patch("app.audio.tts.AsyncElevenLabs", return_value=mock_client):
+        task = asyncio.create_task(history_delete_worker(queue))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    mock_client.history.get_all.assert_called_once_with(page_size=1)
+    mock_client.history.delete.assert_called_once_with(history_item_id="resolved-id")
+
+
+@pytest.mark.asyncio
+async def test_history_delete_worker_skips_when_get_all_returns_no_items():
+    """
+    If get_all returns no items (last_history_item_id empty), the worker logs
+    and moves on — no delete call is made.
+    """
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    await queue.put(LATEST_HISTORY_SENTINEL)
+
+    mock_client = AsyncMock()
+    mock_client.history.get_all.return_value = MagicMock(last_history_item_id="")
+
+    with patch("app.audio.tts.AsyncElevenLabs", return_value=mock_client):
+        task = asyncio.create_task(history_delete_worker(queue))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    mock_client.history.get_all.assert_called_once()
+    mock_client.history.delete.assert_not_called()
 
 
 @pytest.mark.asyncio
