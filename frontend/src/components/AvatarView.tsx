@@ -1,13 +1,15 @@
 import React, { forwardRef } from "react";
 
+export type AvatarState = "idle" | "connecting" | "ready";
+
 interface AvatarViewProps {
-  isReady: boolean;
+  state: AvatarState;
 }
 
 const AvatarView = forwardRef<
   { video: HTMLVideoElement | null; audio: HTMLAudioElement | null },
   AvatarViewProps
->(({ isReady }, ref) => {
+>(({ state }, ref) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const audioRef = React.useRef<HTMLAudioElement>(null);
 
@@ -19,6 +21,8 @@ const AvatarView = forwardRef<
       return audioRef.current;
     },
   }));
+
+  const isReady = state === "ready";
 
   return (
     <div
@@ -75,7 +79,30 @@ const AvatarView = forwardRef<
           }}
         />
 
-        {!isReady && (
+        {state === "idle" && (
+          <div
+            className="fade-in"
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              color: "var(--text-muted)",
+              fontSize: 13,
+              letterSpacing: 0.2,
+              textAlign: "center",
+              padding: 24,
+            }}
+          >
+            <AvatarSilhouette />
+            <span>Avatar will appear here once you start.</span>
+          </div>
+        )}
+
+        {state === "connecting" && (
           <div
             className="fade-in"
             style={{
@@ -134,6 +161,17 @@ const AvatarView = forwardRef<
     </div>
   );
 });
+
+function AvatarSilhouette() {
+  return (
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+         style={{ opacity: 0.45 }} aria-hidden>
+      <circle cx="12" cy="9" r="3.5" />
+      <path d="M4.5 20c1-3.5 4-5.5 7.5-5.5s6.5 2 7.5 5.5" />
+    </svg>
+  );
+}
 
 AvatarView.displayName = "AvatarView";
 export default AvatarView;
