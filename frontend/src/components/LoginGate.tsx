@@ -41,7 +41,7 @@ export default function LoginGate({ children }: { children: ReactNode }) {
   if (state === "checking") {
     return (
       <div style={shellStyle}>
-        <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           <div className="spinner" />
           <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Checking session…</p>
         </div>
@@ -53,13 +53,9 @@ export default function LoginGate({ children }: { children: ReactNode }) {
     return (
       <div style={shellStyle}>
         <form onSubmit={handleSubmit} className="surface fade-in" style={formStyle}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, textAlign: "center" }}>
-            <h1 className="gradient-text" style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>
-              BehavioralDummy
-            </h1>
-            <p style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.5 }}>
-              Enter passcode to continue.
-            </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, textAlign: "center" }}>
+            <h1 style={{ fontSize: 18, fontWeight: 600 }}>BehavioralDummy</h1>
+            <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Enter passcode to continue.</p>
           </div>
           <input
             type="password"
@@ -73,13 +69,13 @@ export default function LoginGate({ children }: { children: ReactNode }) {
           {error && (
             <p
               style={{
-                color: "var(--danger)",
+                color: "#fca5a5",
                 fontSize: 12,
                 margin: 0,
-                padding: "8px 10px",
+                padding: "7px 10px",
                 background: "var(--danger-soft)",
-                border: "1px solid rgba(244, 63, 94, 0.30)",
-                borderRadius: 8,
+                border: "1px solid rgba(229, 72, 77, 0.25)",
+                borderRadius: 6,
               }}
             >
               {error}
@@ -89,7 +85,7 @@ export default function LoginGate({ children }: { children: ReactNode }) {
             type="submit"
             disabled={submitting || !passcode}
             className="btn btn-primary"
-            style={{ width: "100%", padding: "11px 14px" }}
+            style={{ width: "100%", padding: "9px 12px" }}
           >
             {submitting ? "Checking…" : "Unlock"}
           </button>
@@ -112,8 +108,8 @@ const shellStyle: React.CSSProperties = {
 const formStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 14,
-  width: 360,
+  gap: 12,
+  width: 340,
   maxWidth: "100%",
-  padding: 28,
+  padding: 22,
 };
