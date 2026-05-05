@@ -39,7 +39,7 @@ def _not_found_db():
 
 # ── POST /session/ ────────────────────────────────────────────────────────────
 
-def test_create_session_returns_201(lifespan_mocks):
+def test_create_session_returns_201(lifespan_mocks, auth_cookies):
     fake_id = uuid.uuid4()
     mock_db = AsyncMock()
 
@@ -50,13 +50,13 @@ def test_create_session_returns_201(lifespan_mocks):
 
     app = create_app()
     app.dependency_overrides[get_db] = _db_override(mock_db)
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         resp = client.post("/session/")
 
     assert resp.status_code == 201
 
 
-def test_create_session_response_contains_session_id(lifespan_mocks):
+def test_create_session_response_contains_session_id(lifespan_mocks, auth_cookies):
     fake_id = uuid.uuid4()
     mock_db = AsyncMock()
 
@@ -67,13 +67,13 @@ def test_create_session_response_contains_session_id(lifespan_mocks):
 
     app = create_app()
     app.dependency_overrides[get_db] = _db_override(mock_db)
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         resp = client.post("/session/")
 
     assert resp.json()["session_id"] == str(fake_id)
 
 
-def test_create_session_commits_and_refreshes(lifespan_mocks):
+def test_create_session_commits_and_refreshes(lifespan_mocks, auth_cookies):
     fake_id = uuid.uuid4()
     mock_db = AsyncMock()
 
@@ -84,7 +84,7 @@ def test_create_session_commits_and_refreshes(lifespan_mocks):
 
     app = create_app()
     app.dependency_overrides[get_db] = _db_override(mock_db)
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         client.post("/session/")
 
     mock_db.add.assert_called_once()
@@ -94,21 +94,21 @@ def test_create_session_commits_and_refreshes(lifespan_mocks):
 
 # ── DELETE /session/{id} ──────────────────────────────────────────────────────
 
-def test_end_session_returns_200(lifespan_mocks):
+def test_end_session_returns_200(lifespan_mocks, auth_cookies):
     app = create_app()
     app.dependency_overrides[get_db] = _db_override(_found_db())
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         resp = client.delete(f"/session/{uuid.uuid4()}")
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "ended"}
 
 
-def test_end_session_issues_update_with_ended_at(lifespan_mocks):
+def test_end_session_issues_update_with_ended_at(lifespan_mocks, auth_cookies):
     mock_db = _found_db()
     app = create_app()
     app.dependency_overrides[get_db] = _db_override(mock_db)
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         client.delete(f"/session/{uuid.uuid4()}")
 
     assert mock_db.execute.call_count == 2
@@ -116,18 +116,18 @@ def test_end_session_issues_update_with_ended_at(lifespan_mocks):
     assert "ended_at" in update_sql.lower()
 
 
-def test_end_session_unknown_id_returns_404(lifespan_mocks):
+def test_end_session_unknown_id_returns_404(lifespan_mocks, auth_cookies):
     app = create_app()
     app.dependency_overrides[get_db] = _db_override(_not_found_db())
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         resp = client.delete(f"/session/{uuid.uuid4()}")
 
     assert resp.status_code == 404
 
 
-def test_end_session_invalid_uuid_returns_422(lifespan_mocks):
+def test_end_session_invalid_uuid_returns_422(lifespan_mocks, auth_cookies):
     app = create_app()
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         resp = client.delete("/session/not-a-uuid")
 
     assert resp.status_code == 422

@@ -47,22 +47,22 @@ def _open_circuit_breaker() -> CircuitBreaker:
 
 # ── Happy path ────────────────────────────────────────────────────────────────
 
-def test_simli_token_returns_200(lifespan_mocks):
+def test_simli_token_returns_200(lifespan_mocks, auth_cookies):
     http_ctx, _ = _make_httpx_mock({"session_token": "tok-xyz"}, [{"urls": ["stun:stun.l.google.com:19302"]}])
     with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, cookies=auth_cookies) as client:
             resp = client.post("/simli/token")
 
     assert resp.status_code == 200
 
 
-def test_simli_token_returns_session_token_and_ice_servers(lifespan_mocks):
+def test_simli_token_returns_session_token_and_ice_servers(lifespan_mocks, auth_cookies):
     ice = [{"urls": ["turn:example.com:3478"], "username": "u", "credential": "p"}]
     http_ctx, _ = _make_httpx_mock({"session_token": "tok-abc"}, ice)
     with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, cookies=auth_cookies) as client:
             resp = client.post("/simli/token")
 
     body = resp.json()
@@ -70,11 +70,11 @@ def test_simli_token_returns_session_token_and_ice_servers(lifespan_mocks):
     assert body["ice_servers"] == ice
 
 
-def test_simli_token_posts_v3_required_fields(lifespan_mocks):
+def test_simli_token_posts_v3_required_fields(lifespan_mocks, auth_cookies):
     http_ctx, mock_client = _make_httpx_mock({"session_token": "t"}, [])
     with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
-        with TestClient(app) as client:
+        with TestClient(app, cookies=auth_cookies) as client:
             client.post("/simli/token")
 
     sent_json = mock_client.post.call_args.kwargs["json"]
@@ -87,11 +87,11 @@ def test_simli_token_posts_v3_required_fields(lifespan_mocks):
     assert sent_headers.get("x-simli-api-key")
 
 
-def test_simli_token_502_when_response_missing_session_token(lifespan_mocks):
+def test_simli_token_502_when_response_missing_session_token(lifespan_mocks, auth_cookies):
     http_ctx, _ = _make_httpx_mock({}, [])
     with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with TestClient(app, cookies=auth_cookies, raise_server_exceptions=False) as client:
             resp = client.post("/simli/token")
 
     assert resp.status_code == 502
@@ -99,11 +99,11 @@ def test_simli_token_502_when_response_missing_session_token(lifespan_mocks):
 
 # ── Circuit breaker open ──────────────────────────────────────────────────────
 
-def test_simli_token_returns_503_when_circuit_open(lifespan_mocks):
+def test_simli_token_returns_503_when_circuit_open(lifespan_mocks, auth_cookies):
     open_cb = _open_circuit_breaker()
     app = create_app()
     app.dependency_overrides[get_simli_cb] = lambda: open_cb
-    with TestClient(app) as client:
+    with TestClient(app, cookies=auth_cookies) as client:
         resp = client.post("/simli/token")
 
     assert resp.status_code == 503
@@ -111,11 +111,11 @@ def test_simli_token_returns_503_when_circuit_open(lifespan_mocks):
 
 # ── Upstream error ────────────────────────────────────────────────────────────
 
-def test_simli_token_returns_502_on_upstream_4xx(lifespan_mocks):
+def test_simli_token_returns_502_on_upstream_4xx(lifespan_mocks, auth_cookies):
     http_ctx, _ = _make_httpx_mock({}, [], token_status=401)
     with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with TestClient(app, cookies=auth_cookies, raise_server_exceptions=False) as client:
             resp = client.post("/simli/token")
 
     assert resp.status_code == 502
