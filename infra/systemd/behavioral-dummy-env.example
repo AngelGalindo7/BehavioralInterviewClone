@@ -33,3 +33,12 @@ SIMLI_IS_TRINITY=true
 CANDIDATE_NAME=Angel
 LOG_LEVEL=INFO
 ENVIRONMENT=production
+
+# Access gate — single shared passcode + signed-cookie session.
+# ACCESS_PASSCODE: choose ≥12 chars. This is the only thing protecting your
+#   API credits — anyone with this string can run sessions on your account.
+# SESSION_SECRET: random key used to sign auth cookies. Generate with:
+#     python3 -c "import secrets; print(secrets.token_hex(32))"
+#   Rotating this invalidates all existing sessions.
+ACCESS_PASSCODE=CHANGE_ME_strong_passphrase
+SESSION_SECRET=CHANGE_ME_64_hex_chars
