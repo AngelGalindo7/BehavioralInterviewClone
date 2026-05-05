@@ -82,28 +82,26 @@ export default function AdminPage() {
 
   return (
     <div style={pageStyle}>
-      <header style={headerStyle} className="fade-in">
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <h1 className="gradient-text" style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>
-            Stories
-          </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
+      <header style={headerStyle}>
+        <div>
+          <h1 style={{ fontSize: 18, fontWeight: 600 }}>Stories</h1>
+          <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 2 }}>
             Manage the anecdotes that feed retrieval.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <a href="/" className="btn btn-ghost" style={{ padding: "8px 14px", fontSize: 13 }}>
-            ← Interview
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <a href="/" className="btn btn-ghost" style={{ padding: "6px 12px", fontSize: 12.5 }}>
+            Interview
           </a>
-          <button onClick={handleLogout} className="btn btn-ghost" style={{ padding: "8px 14px", fontSize: 13 }}>
+          <button onClick={handleLogout} className="btn btn-ghost" style={{ padding: "6px 12px", fontSize: 12.5 }}>
             Sign out
           </button>
         </div>
       </header>
 
-      <form onSubmit={handleSubmit} className="surface fade-in" style={cardStyle}>
+      <form onSubmit={handleSubmit} className="surface" style={cardStyle}>
         <label style={labelStyle}>
-          Title
+          <span className="label">Title</span>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -114,7 +112,7 @@ export default function AdminPage() {
           />
         </label>
         <label style={labelStyle}>
-          Story (markdown — Situation / Task / Action / Result)
+          <span className="label">Story (markdown — Situation / Task / Action / Result)</span>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
@@ -135,7 +133,6 @@ export default function AdminPage() {
             type="submit"
             disabled={busy || !title || !content}
             className="btn btn-primary"
-            style={{ padding: "9px 18px", fontSize: 13 }}
           >
             {busy ? "Saving…" : "Save story"}
           </button>
@@ -146,23 +143,17 @@ export default function AdminPage() {
       </form>
 
       {message && (
-        <div
-          className="fade-in"
-          style={msgStyle("#a7f3d0", "rgba(16, 185, 129, 0.10)", "rgba(16, 185, 129, 0.30)")}
-        >
+        <div className="surface fade-in" style={msgStyle("var(--text)")}>
           {message}
         </div>
       )}
       {error && (
-        <div
-          className="fade-in"
-          style={msgStyle("#fda4af", "rgba(244, 63, 94, 0.10)", "rgba(244, 63, 94, 0.30)")}
-        >
+        <div className="fade-in" style={errMsgStyle}>
           {error}
         </div>
       )}
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <h2 style={sectionHeading}>
           Ingested stories
           <span className="pill" style={{ marginLeft: 8 }}>{items.length}</span>
@@ -170,23 +161,24 @@ export default function AdminPage() {
         {items.length === 0 ? (
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>No stories yet.</p>
         ) : (
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            {items.map((item) => (
-              <li key={item.source_file} className="surface" style={rowStyle}>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {items.map((item, i) => (
+              <li
+                key={item.source_file}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "10px 12px",
+                  borderTop: "1px solid var(--border)",
+                  borderBottom: i === items.length - 1 ? "1px solid var(--border)" : "none",
+                }}
+              >
                 <div style={{ minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: 14,
-                      fontWeight: 500,
+                      fontSize: 13.5,
                       color: "var(--text)",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -195,7 +187,7 @@ export default function AdminPage() {
                   >
                     {item.source_file}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
                     {item.chunks} chunk(s) · {new Date(item.created_at).toLocaleString()}
                   </div>
                 </div>
@@ -203,7 +195,7 @@ export default function AdminPage() {
                   onClick={() => handleDelete(item.source_file)}
                   disabled={busy}
                   className="btn btn-danger-ghost"
-                  style={{ padding: "6px 12px", fontSize: 12 }}
+                  style={{ padding: "5px 10px", fontSize: 12 }}
                 >
                   Delete
                 </button>
@@ -213,16 +205,18 @@ export default function AdminPage() {
         )}
       </section>
 
-      <section className="surface fade-in" style={cardStyle}>
-        <h2 style={sectionHeading}>Rebuild index</h2>
-        <p style={{ fontSize: 12.5, color: "var(--text-dim)", margin: 0, lineHeight: 1.5 }}>
-          Run this after a batch of edits — not after every save. Briefly pauses queries; do not run during a live interview.
-        </p>
+      <section className="surface" style={cardStyle}>
+        <div>
+          <h2 style={sectionHeading}>Rebuild index</h2>
+          <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.5 }}>
+            Run this after a batch of edits — not after every save. Briefly pauses queries; do not run during a live interview.
+          </p>
+        </div>
         <button
           onClick={handleReindex}
           disabled={reindexing}
           className="btn btn-ghost"
-          style={{ alignSelf: "flex-start", padding: "9px 16px", fontSize: 13 }}
+          style={{ alignSelf: "flex-start" }}
         >
           {reindexing ? "Rebuilding…" : "Rebuild IVFFlat index"}
         </button>
@@ -232,12 +226,12 @@ export default function AdminPage() {
 }
 
 const pageStyle: React.CSSProperties = {
-  maxWidth: 760,
+  maxWidth: 720,
   margin: "0 auto",
-  padding: "32px 24px 56px",
+  padding: "28px 24px 48px",
   display: "flex",
   flexDirection: "column",
-  gap: 22,
+  gap: 20,
 };
 
 const headerStyle: React.CSSProperties = {
@@ -251,22 +245,18 @@ const headerStyle: React.CSSProperties = {
 const cardStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 14,
-  padding: 20,
+  gap: 12,
+  padding: 16,
 };
 
 const labelStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 6,
-  fontSize: 12.5,
-  fontWeight: 500,
-  color: "var(--text-dim)",
-  letterSpacing: 0.2,
 };
 
 const sectionHeading: React.CSSProperties = {
-  fontSize: 14,
+  fontSize: 13.5,
   fontWeight: 600,
   margin: 0,
   color: "var(--text)",
@@ -274,20 +264,17 @@ const sectionHeading: React.CSSProperties = {
   alignItems: "center",
 };
 
-const rowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 14,
-  padding: "12px 14px",
-  borderRadius: 12,
-};
-
-const msgStyle = (color: string, bg: string, border: string): React.CSSProperties => ({
-  padding: "10px 14px",
-  borderRadius: 10,
-  background: bg,
-  color,
+const msgStyle = (color: string): React.CSSProperties => ({
+  padding: "10px 12px",
   fontSize: 13,
-  border: `1px solid ${border}`,
+  color,
 });
+
+const errMsgStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  background: "var(--danger-soft)",
+  color: "#fca5a5",
+  fontSize: 13,
+  border: "1px solid rgba(229, 72, 77, 0.25)",
+};
