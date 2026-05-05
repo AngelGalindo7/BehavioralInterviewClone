@@ -159,220 +159,237 @@ export default function InterviewPage() {
 
   if (error) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ color: "#ef4444", maxWidth: 400, textAlign: "center" }}>{error}</p>
+      <div style={pageCenter}>
+        <div className="surface fade-in" style={{ padding: 24, maxWidth: 440, textAlign: "center" }}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 999,
+              margin: "0 auto 12px",
+              display: "grid",
+              placeItems: "center",
+              background: "var(--danger-soft)",
+              color: "var(--danger)",
+              fontSize: 18,
+              fontWeight: 700,
+            }}
+          >
+            !
+          </div>
+          <p style={{ color: "var(--danger)", fontSize: 14, lineHeight: 1.5 }}>{error}</p>
+        </div>
       </div>
     );
   }
 
   if (!started) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 20,
-          padding: 24,
-          textAlign: "center",
-        }}
+      <div style={pageCenter}>
+        <div
+          className="surface fade-in"
+          style={{
+            padding: "36px 32px",
+            maxWidth: 480,
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 18,
+            textAlign: "center",
+          }}
+        >
+          <span className="pill" style={{ color: "var(--text-dim)" }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: "var(--accent)",
+                boxShadow: "0 0 8px var(--accent)",
+              }}
+            />
+            Real-time AI interview clone
+          </span>
+          <h1 className="gradient-text" style={titleStyle}>BehavioralDummy</h1>
+          <p style={leadStyle}>
+            Starting the session reserves a Simli avatar slot and opens the OpenAI + ElevenLabs
+            pipeline. Each session costs real API credits — only start when you're ready to interview.
+          </p>
+
+          {!confirming ? (
+            <button
+              onClick={() => setConfirming(true)}
+              className="btn btn-primary"
+              style={{ padding: "13px 30px", fontSize: 15 }}
+            >
+              Start session
+            </button>
+          ) : (
+            <div
+              className="fade-in"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 14,
+                padding: 18,
+                border: "1px solid rgba(251, 191, 36, 0.35)",
+                borderRadius: 12,
+                background: "rgba(251, 191, 36, 0.06)",
+                width: "100%",
+              }}
+            >
+              <p style={{ color: "var(--warn)", fontSize: 13.5, lineHeight: 1.5, margin: 0 }}>
+                Are you sure? This will immediately start billing Simli, OpenAI, and ElevenLabs.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setStarted(true)} className="btn btn-danger">
+                  Yes, start
+                </button>
+                <button onClick={() => setConfirming(false)} className="btn btn-ghost">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <a href="/admin" style={footerLink}>
+            Manage stories →
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={pageStack}>
+      <header
+        className="fade-in"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
       >
-        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px" }}>
+        <h1 className="gradient-text" style={{ ...titleStyle, fontSize: 22 }}>
           BehavioralDummy
         </h1>
-        <p style={{ color: "#9ca3af", maxWidth: 420, fontSize: 14, lineHeight: 1.5 }}>
-          Starting the session reserves a Simli avatar slot and opens the OpenAI + ElevenLabs
-          pipeline. Each session costs real API credits — only start when you're ready to interview.
-        </p>
+        <StatusBar
+          wsStatus={wsStatus}
+          lastQuestion={interimText || lastQuestion}
+          isListening={isListening}
+        />
+      </header>
 
-        {!confirming ? (
+      <div className="fade-in" style={{ display: "flex", justifyContent: "center" }}>
+        <AvatarView ref={avatarRef} isReady={avatarReady} />
+      </div>
+
+      <div className="fade-in" style={{ display: "flex", justifyContent: "center" }}>
+        <RecordButton
+          isListening={isListening}
+          disabled={!avatarReady || wsStatus !== "connected"}
+          onStartListening={handleStartListening}
+          onStopListening={handleStopListening}
+          onSkip={handleSkip}
+        />
+      </div>
+
+      {!sessionId && (
+        <p style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
+          Initialising session…
+        </p>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        {!confirmingStop ? (
           <button
-            onClick={() => setConfirming(true)}
-            style={{
-              padding: "12px 28px",
-              fontSize: 15,
-              fontWeight: 600,
-              color: "#fff",
-              background: "#22c55e",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
+            onClick={() => setConfirmingStop(true)}
+            disabled={stopping}
+            className="btn btn-danger-ghost"
+            style={{ padding: "8px 18px", fontSize: 13 }}
           >
-            Start session
+            End session
           </button>
         ) : (
           <div
+            className="fade-in"
             style={{
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               gap: 12,
-              padding: 20,
-              border: "1px solid #374151",
-              borderRadius: 10,
-              background: "#111827",
-              maxWidth: 420,
+              padding: 16,
+              border: "1px solid rgba(244, 63, 94, 0.35)",
+              borderRadius: 12,
+              background: "rgba(244, 63, 94, 0.06)",
+              maxWidth: 440,
             }}
           >
-            <p style={{ color: "#fbbf24", fontSize: 14, margin: 0 }}>
-              Are you sure? This will immediately start billing Simli, OpenAI, and ElevenLabs.
+            <p style={{ color: "#fda4af", fontSize: 13, margin: 0, textAlign: "center", lineHeight: 1.5 }}>
+              End the session? This will release the Simli avatar slot and close the pipeline.
+              Restarting will charge a new token.
             </p>
             <div style={{ display: "flex", gap: 10 }}>
               <button
-                onClick={() => setStarted(true)}
-                style={{
-                  padding: "10px 20px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#fff",
-                  background: "#dc2626",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
+                onClick={() => void handleEndSession()}
+                disabled={stopping}
+                className="btn btn-danger"
+                style={{ padding: "8px 16px", fontSize: 13 }}
               >
-                Yes, start
+                {stopping ? "Ending…" : "Yes, end session"}
               </button>
               <button
-                onClick={() => setConfirming(false)}
-                style={{
-                  padding: "10px 20px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#e5e7eb",
-                  background: "transparent",
-                  border: "1px solid #4b5563",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
+                onClick={() => setConfirmingStop(false)}
+                disabled={stopping}
+                className="btn btn-ghost"
+                style={{ padding: "8px 16px", fontSize: 13 }}
               >
                 Cancel
               </button>
             </div>
           </div>
         )}
-
-        <a href="/admin" style={{ color: "#6b7280", fontSize: 12 }}>
-          Manage stories →
-        </a>
       </div>
-    );
-  }
 
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 24,
-        padding: 24,
-      }}
-    >
-      <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px" }}>
-        BehavioralDummy
-      </h1>
-
-      <AvatarView ref={avatarRef} isReady={avatarReady} />
-
-      <RecordButton
-        isListening={isListening}
-        disabled={!avatarReady || wsStatus !== "connected"}
-        onStartListening={handleStartListening}
-        onStopListening={handleStopListening}
-        onSkip={handleSkip}
-      />
-
-      <StatusBar
-        wsStatus={wsStatus}
-        lastQuestion={interimText || lastQuestion}
-        isListening={isListening}
-      />
-
-      {!sessionId && <p style={{ color: "#6b7280", fontSize: 13 }}>Initialising session…</p>}
-
-      {!confirmingStop ? (
-        <button
-          onClick={() => setConfirmingStop(true)}
-          disabled={stopping}
-          style={{
-            padding: "8px 18px",
-            fontSize: 13,
-            fontWeight: 600,
-            color: "#fca5a5",
-            background: "transparent",
-            border: "1px solid #7f1d1d",
-            borderRadius: 6,
-            cursor: stopping ? "not-allowed" : "pointer",
-            opacity: stopping ? 0.6 : 1,
-          }}
-        >
-          End session
-        </button>
-      ) : (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 10,
-            padding: 16,
-            border: "1px solid #7f1d1d",
-            borderRadius: 10,
-            background: "#1f1011",
-            maxWidth: 420,
-          }}
-        >
-          <p style={{ color: "#fca5a5", fontSize: 13, margin: 0, textAlign: "center" }}>
-            End the session? This will release the Simli avatar slot and close the pipeline.
-            Restarting will charge a new token.
-          </p>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              onClick={() => void handleEndSession()}
-              disabled={stopping}
-              style={{
-                padding: "8px 16px",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#fff",
-                background: "#dc2626",
-                border: "none",
-                borderRadius: 6,
-                cursor: stopping ? "not-allowed" : "pointer",
-                opacity: stopping ? 0.6 : 1,
-              }}
-            >
-              {stopping ? "Ending…" : "Yes, end session"}
-            </button>
-            <button
-              onClick={() => setConfirmingStop(false)}
-              disabled={stopping}
-              style={{
-                padding: "8px 16px",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#e5e7eb",
-                background: "transparent",
-                border: "1px solid #4b5563",
-                borderRadius: 6,
-                cursor: stopping ? "not-allowed" : "pointer",
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      <a href="/admin" style={{ color: "#6b7280", fontSize: 12 }}>
+      <a href="/admin" style={{ ...footerLink, alignSelf: "center" }}>
         Manage stories →
       </a>
     </div>
   );
 }
+
+const pageCenter: React.CSSProperties = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+};
+
+const pageStack: React.CSSProperties = {
+  minHeight: "100vh",
+  maxWidth: 720,
+  margin: "0 auto",
+  padding: "32px 24px 48px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 24,
+};
+
+const titleStyle: React.CSSProperties = {
+  fontSize: 30,
+  fontWeight: 800,
+  letterSpacing: "-0.025em",
+  lineHeight: 1.1,
+};
+
+const leadStyle: React.CSSProperties = {
+  color: "var(--text-dim)",
+  maxWidth: 420,
+  fontSize: 14,
+  lineHeight: 1.55,
+};
+
+const footerLink: React.CSSProperties = {
+  color: "var(--text-muted)",
+  fontSize: 12,
+  letterSpacing: 0.2,
+};
