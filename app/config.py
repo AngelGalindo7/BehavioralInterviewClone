@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:5173"
     max_ws_text_frame_bytes: int = 4096
 
+    # Access gate — single shared passcode + signed-cookie session.
+    # Both required (no defaults) so a misconfigured deploy fails loud at startup.
+    access_passcode: str
+    session_secret: str
+    auth_cookie_name: str = "bd_auth"
+    auth_cookie_max_age_seconds: int = 60 * 60 * 24 * 30  # 30 days
+
     # Memory profiling
     tracemalloc_interval_seconds: int = 300
 
