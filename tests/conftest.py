@@ -13,6 +13,8 @@ os.environ.setdefault("ELEVENLABS_API_KEY", "el-test")
 os.environ.setdefault("ELEVENLABS_VOICE_ID", "voice-test")
 os.environ.setdefault("SIMLI_API_KEY", "simli-test")
 os.environ.setdefault("SIMLI_FACE_ID", "face-test")
+os.environ.setdefault("ACCESS_PASSCODE", "test-passcode")
+os.environ.setdefault("SESSION_SECRET", "test-session-secret-min-32-chars-long")
 
 
 @pytest.fixture
