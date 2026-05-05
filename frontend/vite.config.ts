@@ -15,6 +15,8 @@ export default defineConfig({
       "/simli": "http://localhost:8000",
       "/health": "http://localhost:8000",
       "/ready": "http://localhost:8000",
+      "/auth": "http://localhost:8000",
+      "/admin": "http://localhost:8000",
     },
   },
 });
