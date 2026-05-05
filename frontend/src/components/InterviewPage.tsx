@@ -167,24 +167,8 @@ export default function InterviewPage() {
   if (error) {
     return (
       <div style={pageCenter}>
-        <div className="surface fade-in" style={{ padding: 24, maxWidth: 440, textAlign: "center" }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 999,
-              margin: "0 auto 12px",
-              display: "grid",
-              placeItems: "center",
-              background: "var(--danger-soft)",
-              color: "var(--danger)",
-              fontSize: 18,
-              fontWeight: 700,
-            }}
-          >
-            !
-          </div>
-          <p style={{ color: "var(--danger)", fontSize: 14, lineHeight: 1.5 }}>{error}</p>
+        <div className="surface fade-in" style={{ padding: 20, maxWidth: 420, textAlign: "center" }}>
+          <p style={{ color: "var(--danger)", fontSize: 13.5 }}>{error}</p>
         </div>
       </div>
     );
@@ -193,48 +177,19 @@ export default function InterviewPage() {
   if (phase === "landing") {
     return (
       <div style={pageCenter}>
-        <div
-          className="surface fade-in"
-          style={{
-            padding: "36px 32px",
-            maxWidth: 480,
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 18,
-            textAlign: "center",
-          }}
-        >
-          <span className="pill" style={{ color: "var(--text-dim)" }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 999,
-                background: "var(--accent)",
-                boxShadow: "0 0 8px var(--accent)",
-              }}
-            />
-            Real-time AI interview clone
-          </span>
-          <h1 className="gradient-text" style={titleStyle}>BehavioralDummy</h1>
-          <p style={leadStyle}>
-            Click below to enter the interview view. Nothing is billed until you press Start
-            from the next screen.
+        <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, maxWidth: 380, textAlign: "center" }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600 }}>BehavioralDummy</h1>
+          <p style={{ color: "var(--text-dim)", fontSize: 14 }}>
+            Click below to enter the interview view. Nothing is billed until you press Start.
           </p>
-
           <button
             onClick={() => setPhase("preview")}
             className="btn btn-primary"
-            style={{ padding: "13px 30px", fontSize: 15 }}
+            style={{ padding: "10px 22px" }}
           >
             Enter session
           </button>
-
-          <a href="/admin" style={footerLink}>
-            Manage stories →
-          </a>
+          <a href="/admin" style={footerLink}>Manage stories →</a>
         </div>
       </div>
     );
@@ -246,13 +201,8 @@ export default function InterviewPage() {
 
   return (
     <div style={pageStack}>
-      <header
-        className="fade-in"
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
-      >
-        <h1 className="gradient-text" style={{ ...titleStyle, fontSize: 22 }}>
-          BehavioralDummy
-        </h1>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <h1 style={{ fontSize: 17, fontWeight: 600 }}>BehavioralDummy</h1>
         {phase === "running" && (
           <StatusBar
             wsStatus={wsStatus}
@@ -266,7 +216,7 @@ export default function InterviewPage() {
         <AvatarView ref={avatarRef} state={avatarState} />
       </div>
 
-      <div className="fade-in" style={{ display: "flex", justifyContent: "center" }}>
+      <div style={{ display: "flex", justifyContent: "center" }}>
         <RecordButton
           isListening={isListening}
           disabled={recordDisabled}
@@ -283,61 +233,34 @@ export default function InterviewPage() {
       )}
 
       {phase === "preview" && (
-        <div style={{ display: "flex", justifyContent: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           {!confirmingStart ? (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 8,
-                maxWidth: 440,
-                textAlign: "center",
-              }}
-            >
+            <>
               <button
                 onClick={() => setConfirmingStart(true)}
                 className="btn btn-primary"
-                style={{ padding: "13px 32px", fontSize: 15 }}
+                style={{ padding: "10px 24px" }}
               >
-                Start interview
+                Start
               </button>
-              <p style={{ color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5, margin: 0 }}>
-                This reserves a Simli avatar slot and opens the OpenAI + ElevenLabs pipeline.
-                Real API credits will be used.
+              <p style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", maxWidth: 360 }}>
+                Reserves a Simli avatar slot and opens the OpenAI + ElevenLabs pipeline. Real API
+                credits will be used.
               </p>
-              <button
-                onClick={handleBackToLanding}
-                className="btn btn-ghost"
-                style={{ padding: "6px 14px", fontSize: 12, marginTop: 4 }}
-              >
-                ← Back
+              <button onClick={handleBackToLanding} className="btn btn-ghost" style={{ padding: "5px 10px", fontSize: 12 }}>
+                Back
               </button>
-            </div>
+            </>
           ) : (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 12,
-                padding: 18,
-                border: "1px solid rgba(251, 191, 36, 0.35)",
-                borderRadius: 12,
-                background: "rgba(251, 191, 36, 0.06)",
-                maxWidth: 440,
-              }}
-            >
-              <p style={{ color: "var(--warn)", fontSize: 13.5, lineHeight: 1.5, margin: 0, textAlign: "center" }}>
-                Are you sure? This will immediately start billing Simli, OpenAI, and ElevenLabs.
+            <div className="surface fade-in" style={inlineConfirmStyle}>
+              <p style={{ color: "var(--text)", fontSize: 13.5, margin: 0, textAlign: "center" }}>
+                Start billing now?
               </p>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setPhase("running")} className="btn btn-danger">
-                  Yes, start
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setPhase("running")} className="btn btn-primary" style={{ padding: "7px 14px", fontSize: 13 }}>
+                  Start
                 </button>
-                <button onClick={() => setConfirmingStart(false)} className="btn btn-ghost">
+                <button onClick={() => setConfirmingStart(false)} className="btn btn-ghost" style={{ padding: "7px 14px", fontSize: 13 }}>
                   Cancel
                 </button>
               </div>
@@ -353,43 +276,29 @@ export default function InterviewPage() {
               onClick={() => setConfirmingStop(true)}
               disabled={stopping}
               className="btn btn-danger-ghost"
-              style={{ padding: "8px 18px", fontSize: 13 }}
+              style={{ padding: "7px 14px", fontSize: 12.5 }}
             >
               End session
             </button>
           ) : (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 12,
-                padding: 16,
-                border: "1px solid rgba(244, 63, 94, 0.35)",
-                borderRadius: 12,
-                background: "rgba(244, 63, 94, 0.06)",
-                maxWidth: 440,
-              }}
-            >
-              <p style={{ color: "#fda4af", fontSize: 13, margin: 0, textAlign: "center", lineHeight: 1.5 }}>
-                End the session? This will release the Simli avatar slot and close the pipeline.
-                Restarting will charge a new token.
+            <div className="surface fade-in" style={inlineConfirmStyle}>
+              <p style={{ color: "var(--text)", fontSize: 13.5, margin: 0, textAlign: "center" }}>
+                End the session?
               </p>
-              <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ display: "flex", gap: 8 }}>
                 <button
                   onClick={() => void handleEndSession()}
                   disabled={stopping}
                   className="btn btn-danger"
-                  style={{ padding: "8px 16px", fontSize: 13 }}
+                  style={{ padding: "7px 14px", fontSize: 13 }}
                 >
-                  {stopping ? "Ending…" : "Yes, end session"}
+                  {stopping ? "Ending…" : "End"}
                 </button>
                 <button
                   onClick={() => setConfirmingStop(false)}
                   disabled={stopping}
                   className="btn btn-ghost"
-                  style={{ padding: "8px 16px", fontSize: 13 }}
+                  style={{ padding: "7px 14px", fontSize: 13 }}
                 >
                   Cancel
                 </button>
@@ -399,9 +308,7 @@ export default function InterviewPage() {
         </div>
       )}
 
-      <a href="/admin" style={{ ...footerLink, alignSelf: "center" }}>
-        Manage stories →
-      </a>
+      <a href="/admin" style={{ ...footerLink, alignSelf: "center" }}>Manage stories →</a>
     </div>
   );
 }
@@ -416,30 +323,24 @@ const pageCenter: React.CSSProperties = {
 
 const pageStack: React.CSSProperties = {
   minHeight: "100vh",
-  maxWidth: 720,
+  maxWidth: 640,
   margin: "0 auto",
-  padding: "32px 24px 48px",
+  padding: "28px 24px 40px",
   display: "flex",
   flexDirection: "column",
-  gap: 24,
+  gap: 22,
 };
 
-const titleStyle: React.CSSProperties = {
-  fontSize: 30,
-  fontWeight: 800,
-  letterSpacing: "-0.025em",
-  lineHeight: 1.1,
-};
-
-const leadStyle: React.CSSProperties = {
-  color: "var(--text-dim)",
-  maxWidth: 420,
-  fontSize: 14,
-  lineHeight: 1.55,
+const inlineConfirmStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 10,
+  padding: 14,
+  maxWidth: 320,
 };
 
 const footerLink: React.CSSProperties = {
   color: "var(--text-muted)",
   fontSize: 12,
-  letterSpacing: 0.2,
 };
