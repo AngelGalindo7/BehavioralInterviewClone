@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import AvatarView from "./AvatarView";
+import AvatarView, { type AvatarState } from "./AvatarView";
 import RecordButton from "./RecordButton";
 import StatusBar from "./StatusBar";
 import { destroyAvatar, initSimliAvatar, interruptAvatar, sendAudioToAvatar } from "../lib/simliAvatar";
@@ -10,9 +10,11 @@ import {
 } from "../lib/speechRecognition";
 import { InterviewWebSocket } from "../lib/wsClient";
 
+type Phase = "landing" | "preview" | "running";
+
 export default function InterviewPage() {
-  const [started, setStarted] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  const [phase, setPhase] = useState<Phase>("landing");
+  const [confirmingStart, setConfirmingStart] = useState(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export default function InterviewPage() {
   const avatarRef = useRef<{ video: HTMLVideoElement | null; audio: HTMLAudioElement | null }>(null);
 
   useEffect(() => {
-    if (!started) return;
+    if (phase !== "running") return;
 
     if (!isSpeechRecognitionSupported()) {
       setError("WebSpeech API is not supported. Please use Google Chrome.");
@@ -86,7 +88,7 @@ export default function InterviewPage() {
       wsRef.current?.close();
       void destroyAvatar();
     };
-  }, [started]);
+  }, [phase]);
 
   const handleStartListening = useCallback(() => {
     if (!avatarReady) return;
@@ -152,10 +154,15 @@ export default function InterviewPage() {
     setLastQuestion("");
     setInterimText("");
     setConfirmingStop(false);
-    setConfirming(false);
-    setStarted(false);
+    setConfirmingStart(false);
+    setPhase("landing");
     setStopping(false);
   }, [sessionId, stopping]);
+
+  const handleBackToLanding = useCallback(() => {
+    setConfirmingStart(false);
+    setPhase("landing");
+  }, []);
 
   if (error) {
     return (
@@ -183,7 +190,7 @@ export default function InterviewPage() {
     );
   }
 
-  if (!started) {
+  if (phase === "landing") {
     return (
       <div style={pageCenter}>
         <div
@@ -213,46 +220,17 @@ export default function InterviewPage() {
           </span>
           <h1 className="gradient-text" style={titleStyle}>BehavioralDummy</h1>
           <p style={leadStyle}>
-            Starting the session reserves a Simli avatar slot and opens the OpenAI + ElevenLabs
-            pipeline. Each session costs real API credits — only start when you're ready to interview.
+            Click below to enter the interview view. Nothing is billed until you press Start
+            from the next screen.
           </p>
 
-          {!confirming ? (
-            <button
-              onClick={() => setConfirming(true)}
-              className="btn btn-primary"
-              style={{ padding: "13px 30px", fontSize: 15 }}
-            >
-              Start session
-            </button>
-          ) : (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 14,
-                padding: 18,
-                border: "1px solid rgba(251, 191, 36, 0.35)",
-                borderRadius: 12,
-                background: "rgba(251, 191, 36, 0.06)",
-                width: "100%",
-              }}
-            >
-              <p style={{ color: "var(--warn)", fontSize: 13.5, lineHeight: 1.5, margin: 0 }}>
-                Are you sure? This will immediately start billing Simli, OpenAI, and ElevenLabs.
-              </p>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setStarted(true)} className="btn btn-danger">
-                  Yes, start
-                </button>
-                <button onClick={() => setConfirming(false)} className="btn btn-ghost">
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
+          <button
+            onClick={() => setPhase("preview")}
+            className="btn btn-primary"
+            style={{ padding: "13px 30px", fontSize: 15 }}
+          >
+            Enter session
+          </button>
 
           <a href="/admin" style={footerLink}>
             Manage stories →
@@ -261,6 +239,10 @@ export default function InterviewPage() {
       </div>
     );
   }
+
+  const avatarState: AvatarState =
+    phase === "running" ? (avatarReady ? "ready" : "connecting") : "idle";
+  const recordDisabled = phase !== "running" || !avatarReady || wsStatus !== "connected";
 
   return (
     <div style={pageStack}>
@@ -271,83 +253,151 @@ export default function InterviewPage() {
         <h1 className="gradient-text" style={{ ...titleStyle, fontSize: 22 }}>
           BehavioralDummy
         </h1>
-        <StatusBar
-          wsStatus={wsStatus}
-          lastQuestion={interimText || lastQuestion}
-          isListening={isListening}
-        />
+        {phase === "running" && (
+          <StatusBar
+            wsStatus={wsStatus}
+            lastQuestion={interimText || lastQuestion}
+            isListening={isListening}
+          />
+        )}
       </header>
 
       <div className="fade-in" style={{ display: "flex", justifyContent: "center" }}>
-        <AvatarView ref={avatarRef} isReady={avatarReady} />
+        <AvatarView ref={avatarRef} state={avatarState} />
       </div>
 
       <div className="fade-in" style={{ display: "flex", justifyContent: "center" }}>
         <RecordButton
           isListening={isListening}
-          disabled={!avatarReady || wsStatus !== "connected"}
+          disabled={recordDisabled}
           onStartListening={handleStartListening}
           onStopListening={handleStopListening}
           onSkip={handleSkip}
         />
       </div>
 
-      {!sessionId && (
+      {phase === "running" && !sessionId && (
         <p style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
           Initialising session…
         </p>
       )}
 
-      <div style={{ display: "flex", justifyContent: "center" }}>
-        {!confirmingStop ? (
-          <button
-            onClick={() => setConfirmingStop(true)}
-            disabled={stopping}
-            className="btn btn-danger-ghost"
-            style={{ padding: "8px 18px", fontSize: 13 }}
-          >
-            End session
-          </button>
-        ) : (
-          <div
-            className="fade-in"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-              padding: 16,
-              border: "1px solid rgba(244, 63, 94, 0.35)",
-              borderRadius: 12,
-              background: "rgba(244, 63, 94, 0.06)",
-              maxWidth: 440,
-            }}
-          >
-            <p style={{ color: "#fda4af", fontSize: 13, margin: 0, textAlign: "center", lineHeight: 1.5 }}>
-              End the session? This will release the Simli avatar slot and close the pipeline.
-              Restarting will charge a new token.
-            </p>
-            <div style={{ display: "flex", gap: 10 }}>
+      {phase === "preview" && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          {!confirmingStart ? (
+            <div
+              className="fade-in"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                maxWidth: 440,
+                textAlign: "center",
+              }}
+            >
               <button
-                onClick={() => void handleEndSession()}
-                disabled={stopping}
-                className="btn btn-danger"
-                style={{ padding: "8px 16px", fontSize: 13 }}
+                onClick={() => setConfirmingStart(true)}
+                className="btn btn-primary"
+                style={{ padding: "13px 32px", fontSize: 15 }}
               >
-                {stopping ? "Ending…" : "Yes, end session"}
+                Start interview
               </button>
+              <p style={{ color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5, margin: 0 }}>
+                This reserves a Simli avatar slot and opens the OpenAI + ElevenLabs pipeline.
+                Real API credits will be used.
+              </p>
               <button
-                onClick={() => setConfirmingStop(false)}
-                disabled={stopping}
+                onClick={handleBackToLanding}
                 className="btn btn-ghost"
-                style={{ padding: "8px 16px", fontSize: 13 }}
+                style={{ padding: "6px 14px", fontSize: 12, marginTop: 4 }}
               >
-                Cancel
+                ← Back
               </button>
             </div>
-          </div>
-        )}
-      </div>
+          ) : (
+            <div
+              className="fade-in"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 12,
+                padding: 18,
+                border: "1px solid rgba(251, 191, 36, 0.35)",
+                borderRadius: 12,
+                background: "rgba(251, 191, 36, 0.06)",
+                maxWidth: 440,
+              }}
+            >
+              <p style={{ color: "var(--warn)", fontSize: 13.5, lineHeight: 1.5, margin: 0, textAlign: "center" }}>
+                Are you sure? This will immediately start billing Simli, OpenAI, and ElevenLabs.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setPhase("running")} className="btn btn-danger">
+                  Yes, start
+                </button>
+                <button onClick={() => setConfirmingStart(false)} className="btn btn-ghost">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {phase === "running" && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          {!confirmingStop ? (
+            <button
+              onClick={() => setConfirmingStop(true)}
+              disabled={stopping}
+              className="btn btn-danger-ghost"
+              style={{ padding: "8px 18px", fontSize: 13 }}
+            >
+              End session
+            </button>
+          ) : (
+            <div
+              className="fade-in"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 12,
+                padding: 16,
+                border: "1px solid rgba(244, 63, 94, 0.35)",
+                borderRadius: 12,
+                background: "rgba(244, 63, 94, 0.06)",
+                maxWidth: 440,
+              }}
+            >
+              <p style={{ color: "#fda4af", fontSize: 13, margin: 0, textAlign: "center", lineHeight: 1.5 }}>
+                End the session? This will release the Simli avatar slot and close the pipeline.
+                Restarting will charge a new token.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={() => void handleEndSession()}
+                  disabled={stopping}
+                  className="btn btn-danger"
+                  style={{ padding: "8px 16px", fontSize: 13 }}
+                >
+                  {stopping ? "Ending…" : "Yes, end session"}
+                </button>
+                <button
+                  onClick={() => setConfirmingStop(false)}
+                  disabled={stopping}
+                  className="btn btn-ghost"
+                  style={{ padding: "8px 16px", fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <a href="/admin" style={{ ...footerLink, alignSelf: "center" }}>
         Manage stories →
