@@ -11,6 +11,8 @@ import {
 import { InterviewWebSocket } from "../lib/wsClient";
 
 export default function InterviewPage() {
+  const [started, setStarted] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [isListening, setIsListening] = useState(false);
@@ -24,6 +26,8 @@ export default function InterviewPage() {
   const avatarRef = useRef<{ video: HTMLVideoElement | null; audio: HTMLAudioElement | null }>(null);
 
   useEffect(() => {
+    if (!started) return;
+
     if (!isSpeechRecognitionSupported()) {
       setError("WebSpeech API is not supported. Please use Google Chrome.");
       return;
@@ -80,7 +84,7 @@ export default function InterviewPage() {
       wsRef.current?.close();
       void destroyAvatar();
     };
-  }, []);
+  }, [started]);
 
   const handleStartListening = useCallback(() => {
     if (!avatarReady) return;
@@ -118,6 +122,103 @@ export default function InterviewPage() {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <p style={{ color: "#ef4444", maxWidth: 400, textAlign: "center" }}>{error}</p>
+      </div>
+    );
+  }
+
+  if (!started) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 20,
+          padding: 24,
+          textAlign: "center",
+        }}
+      >
+        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px" }}>
+          BehavioralDummy
+        </h1>
+        <p style={{ color: "#9ca3af", maxWidth: 420, fontSize: 14, lineHeight: 1.5 }}>
+          Starting the session reserves a Simli avatar slot and opens the OpenAI + ElevenLabs
+          pipeline. Each session costs real API credits — only start when you're ready to interview.
+        </p>
+
+        {!confirming ? (
+          <button
+            onClick={() => setConfirming(true)}
+            style={{
+              padding: "12px 28px",
+              fontSize: 15,
+              fontWeight: 600,
+              color: "#fff",
+              background: "#22c55e",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            Start session
+          </button>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 12,
+              padding: 20,
+              border: "1px solid #374151",
+              borderRadius: 10,
+              background: "#111827",
+              maxWidth: 420,
+            }}
+          >
+            <p style={{ color: "#fbbf24", fontSize: 14, margin: 0 }}>
+              Are you sure? This will immediately start billing Simli, OpenAI, and ElevenLabs.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => setStarted(true)}
+                style={{
+                  padding: "10px 20px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: "#dc2626",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                Yes, start
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                style={{
+                  padding: "10px 20px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#e5e7eb",
+                  background: "transparent",
+                  border: "1px solid #4b5563",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        <a href="/admin" style={{ color: "#6b7280", fontSize: 12 }}>
+          Manage stories →
+        </a>
       </div>
     );
   }
