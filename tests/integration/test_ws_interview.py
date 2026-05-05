@@ -7,10 +7,14 @@ Asserts that:
      prefixed with the new 1-byte audio dispatch protocol (0x01 immediate).
   2. Sending {type: "skip"} is accepted silently — the new protocol has the
      frontend call simliClient.ClearBuffer() locally; the backend just logs.
+  3. Closing the WebSocket mid-pipeline propagates CancelledError into the
+     OpenAI Responses async-for so upstream billing stops.
 """
 import asyncio
 import json
 import os
+import threading
+import time
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -113,6 +117,65 @@ async def test_skip_message_is_accepted_silently(auth_cookies):
                 # Close the socket; if no bytes were emitted by skip, this is fine.
             # If we got here without the test client raising on receive, the skip
             # path didn't push any bytes. Implicit assertion via no exception.
+
+
+@pytest.mark.asyncio
+async def test_disconnect_cancels_in_flight_openai_stream(fake_embedding, fake_anecdotes, auth_cookies):
+    """
+    Closing the WebSocket while the OpenAI Responses stream is mid-flight must
+    propagate CancelledError into the async-for so the upstream HTTP request is
+    dropped (and we stop being billed for tokens). Uses threading.Event because
+    the mocked generator runs in TestClient's server loop, not the test's loop.
+    """
+    cancellation_observed = threading.Event()
+    fake_pcm = bytes(6000)
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return fake_embedding
+
+    async def _fake_retrieve(_session, _emb, **_kw) -> list[str]:
+        return fake_anecdotes
+
+    async def _fake_generate(_q, _sp, _prev, _cb):
+        try:
+            yield "First sentence.", "resp-1"
+            await asyncio.sleep(30)
+            yield "second", "resp-1"
+        except asyncio.CancelledError:
+            cancellation_observed.set()
+            raise
+
+    async def _fake_tts(_text, _queue):
+        yield fake_pcm
+
+    with (
+        patch("app.api.ws_interview.embed_text", side_effect=_fake_embed),
+        patch("app.api.ws_interview.retrieve_anecdotes", side_effect=_fake_retrieve),
+        patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
+        patch("app.api.ws_interview.stream_tts_pcm", side_effect=_fake_tts),
+        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._warmup_ivfflat_index", new_callable=AsyncMock),
+        patch("app.api.ws_interview.Turn"),
+        patch("app.api.ws_interview.AsyncSessionLocal"),
+    ):
+        from app.main import create_app
+        app = create_app()
+
+        with TestClient(app, cookies=auth_cookies) as client:
+            session_id = str(uuid.uuid4())
+            with client.websocket_connect(f"/ws/interview?session_id={session_id}") as ws:
+                ws.send_text(json.dumps({"type": "transcript", "text": "Tell me about yourself."}))
+                ws.receive_bytes()
+            # Exiting the `with` block sends close — give the server loop a
+            # moment to observe disconnect and cancel the in-flight task.
+            for _ in range(40):
+                if cancellation_observed.is_set():
+                    break
+                time.sleep(0.05)
+
+        assert cancellation_observed.is_set(), (
+            "OpenAI stream was not cancelled on disconnect — upstream billing would continue"
+        )
 
 
 @pytest.mark.asyncio

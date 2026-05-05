@@ -5,7 +5,7 @@ Protocol (client → server, JSON text frames, capped at settings.max_ws_text_fr
   {"type": "transcript", "text": "<interviewer question>"}
   {"type": "skip"}   — the frontend already called simliClient.ClearBuffer()
                        locally; this just informs the backend (logged for now,
-                       mid-pipeline cancellation is not yet wired).
+                       skip-driven mid-pipeline cancellation is not yet wired).
 
 Protocol (server → client, binary frames):
   1-byte prefix + raw PCM16 LE audio at 16 kHz.
@@ -21,6 +21,13 @@ TTFB budget (target ≤ 630 ms):
   as soon as the pending text crosses a sentence boundary (or exceeds
   sentence_boundary_max_chars on a runaway sentence), the partial text is sent
   to ElevenLabs and the resulting PCM is forwarded to the browser immediately.
+
+Disconnect cancellation:
+  Reader and processor run inside an asyncio.TaskGroup. When the client closes
+  the socket, iter_text() raises WebSocketDisconnect in the reader, which cancels
+  the processor; CancelledError propagates through _handle_transcript into the
+  OpenAI and ElevenLabs async-for loops, closing the underlying httpx responses
+  and stopping upstream token/character billing for the in-flight turn.
 """
 import asyncio
 import json
@@ -144,6 +151,12 @@ async def _handle_transcript(
     Run the full pipeline for one interviewer question.
     next_sequence only advances if the turn was successfully persisted, so
     the turns table never has gaps caused by mid-pipeline failures.
+
+    Cancellation: when the enclosing task is cancelled (WS disconnect), the
+    CancelledError propagates through the OpenAI and ElevenLabs async-for loops,
+    closing their underlying httpx responses. tts.py's finally block enqueues
+    any captured history_item_id before re-raising, so even a cancelled stream
+    cleans up its ElevenLabs history row.
     """
     t0 = time.monotonic()
     first_byte_logged = False
@@ -199,6 +212,16 @@ async def _handle_transcript(
         if pending_text.strip():
             await _flush(pending_text)
         await elevenlabs_cb.on_success()
+    except asyncio.CancelledError:
+        # Disconnect-driven cancellation: stream aclose runs as the async-for
+        # iterators unwind, which terminates the upstream OpenAI/ElevenLabs
+        # HTTP requests. Re-raise so the TaskGroup unwinds cleanly.
+        log.info(
+            "turn_cancelled_on_disconnect",
+            session_id=str(session_id),
+            sequence=sequence,
+        )
+        raise
     except CircuitOpenError:
         log.error("circuit_open_during_turn", session_id=str(session_id))
         await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
@@ -241,23 +264,41 @@ async def interview_ws(
     elevenlabs_cb: CircuitBreaker = Depends(get_elevenlabs_cb),
     history_queue: asyncio.Queue[str] = Depends(get_history_queue),
 ) -> None:
+    """
+    Reader/processor split inside a TaskGroup so a client disconnect cancels
+    any in-flight pipeline turn rather than waiting for the next send_bytes
+    to fail. Without this, OpenAI/ElevenLabs streams keep consuming tokens
+    after the user has hung up.
+    """
     await websocket.accept()
     log.info("ws_connected", session_id=str(session_id))
 
-    previous_response_id: str | None = None
-    sequence = 0
+    inbox: asyncio.Queue[str | None] = asyncio.Queue()
     max_bytes = settings.max_ws_text_frame_bytes
 
-    try:
-        async for raw in websocket.iter_text():
-            if len(raw) > max_bytes:
-                log.warning(
-                    "ws_frame_too_large",
-                    session_id=str(session_id),
-                    size=len(raw),
-                    limit=max_bytes,
-                )
-                continue
+    async def _reader() -> None:
+        try:
+            async for raw in websocket.iter_text():
+                if len(raw) > max_bytes:
+                    log.warning(
+                        "ws_frame_too_large",
+                        session_id=str(session_id),
+                        size=len(raw),
+                        limit=max_bytes,
+                    )
+                    continue
+                await inbox.put(raw)
+        finally:
+            # Sentinel wakes the processor if it's blocked on inbox.get().
+            await inbox.put(None)
+
+    async def _processor() -> None:
+        previous_response_id: str | None = None
+        sequence = 0
+        while True:
+            raw = await inbox.get()
+            if raw is None:
+                return
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
@@ -265,11 +306,9 @@ async def interview_ws(
                 continue
 
             msg_type = msg.get("type")
-
             if msg_type == "skip":
                 log.debug("ws_skip_received", session_id=str(session_id))
                 continue
-
             if msg_type != "transcript":
                 log.debug("ws_unknown_message_type", msg_type=msg_type)
                 continue
@@ -289,7 +328,12 @@ async def interview_ws(
                 history_queue=history_queue,
             )
 
-    except WebSocketDisconnect:
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_reader(), name="ws-reader")
+            tg.create_task(_processor(), name="ws-processor")
+    except* WebSocketDisconnect:
         log.info("ws_disconnected", session_id=str(session_id))
-    except Exception as exc:
-        log.error("ws_unhandled_error", session_id=str(session_id), error=str(exc))
+    except* Exception as eg:
+        for exc in eg.exceptions:
+            log.error("ws_unhandled_error", session_id=str(session_id), error=str(exc))
