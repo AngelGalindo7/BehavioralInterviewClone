@@ -9,7 +9,9 @@ LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libjemalloc.so.2
 # Database — single-user: point directly at RDS instance endpoint (no proxy needed).
 # These pool values override config.py defaults (5/3) — 2 workers × (2+1) = 6 connections,
 # well within db.t3.micro's ~110 max_connections limit.
-DATABASE_URL=postgresql+asyncpg://bduser:CHANGE_ME@your-rds-instance.us-west-2.rds.amazonaws.com:5432/behavioral_dummy
+# RDS rejects unencrypted connections (pg_hba is hostssl-only). asyncpg ignores
+# `sslmode=require` (psycopg2 syntax) — must use `?ssl=require`.
+DATABASE_URL=postgresql+asyncpg://bduser:CHANGE_ME@your-rds-instance.us-west-2.rds.amazonaws.com:5432/behavioral_dummy?ssl=require
 DB_POOL_SIZE=2
 DB_MAX_OVERFLOW=1
 DB_POOL_TIMEOUT=30
