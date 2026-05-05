@@ -43,6 +43,13 @@ async def bulk_insert(
     print(f"Inserted {len(rows)} anecdotes.")
 
 
+async def clear_anecdotes() -> None:
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(text("DELETE FROM anecdotes"))
+    print("All existing anecdotes cleared from database.")
+
+
 async def recreate_ivfflat_index() -> None:
     async with engine.begin() as conn:
         await conn.execute(
@@ -76,12 +83,20 @@ async def main() -> None:
         help="Drop and rebuild the IVFFlat index after ingestion (recommended)",
     )
     parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Delete all existing anecdotes from the database before ingestion",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=100,
         help="Number of texts per OpenAI embedding API call",
     )
     args = parser.parse_args()
+
+    if args.clear:
+        await clear_anecdotes()
 
     chunks = load_and_chunk(args.dir)
     if not chunks:
