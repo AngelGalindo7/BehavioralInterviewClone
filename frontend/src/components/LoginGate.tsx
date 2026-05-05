@@ -41,7 +41,10 @@ export default function LoginGate({ children }: { children: ReactNode }) {
   if (state === "checking") {
     return (
       <div style={shellStyle}>
-        <p style={{ color: "#6b7280", fontSize: 13 }}>Checking session…</p>
+        <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <div className="spinner" />
+          <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Checking session…</p>
+        </div>
       </div>
     );
   }
@@ -49,22 +52,45 @@ export default function LoginGate({ children }: { children: ReactNode }) {
   if (state === "needs-login") {
     return (
       <div style={shellStyle}>
-        <form onSubmit={handleSubmit} style={formStyle}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>BehavioralDummy</h1>
-          <p style={{ color: "#6b7280", fontSize: 13, margin: 0 }}>
-            Enter passcode to continue.
-          </p>
+        <form onSubmit={handleSubmit} className="surface fade-in" style={formStyle}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, textAlign: "center" }}>
+            <h1 className="gradient-text" style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>
+              BehavioralDummy
+            </h1>
+            <p style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.5 }}>
+              Enter passcode to continue.
+            </p>
+          </div>
           <input
             type="password"
             autoFocus
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
             disabled={submitting}
-            style={inputStyle}
+            className="input"
             placeholder="Passcode"
           />
-          {error && <p style={{ color: "#ef4444", fontSize: 12, margin: 0 }}>{error}</p>}
-          <button type="submit" disabled={submitting || !passcode} style={buttonStyle}>
+          {error && (
+            <p
+              style={{
+                color: "var(--danger)",
+                fontSize: 12,
+                margin: 0,
+                padding: "8px 10px",
+                background: "var(--danger-soft)",
+                border: "1px solid rgba(244, 63, 94, 0.30)",
+                borderRadius: 8,
+              }}
+            >
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={submitting || !passcode}
+            className="btn btn-primary"
+            style={{ width: "100%", padding: "11px 14px" }}
+          >
             {submitting ? "Checking…" : "Unlock"}
           </button>
         </form>
@@ -86,26 +112,8 @@ const shellStyle: React.CSSProperties = {
 const formStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 12,
-  width: 320,
-  padding: 24,
-  border: "1px solid #e5e7eb",
-  borderRadius: 8,
-};
-
-const inputStyle: React.CSSProperties = {
-  padding: "10px 12px",
-  border: "1px solid #d1d5db",
-  borderRadius: 6,
-  fontSize: 14,
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: "10px 12px",
-  border: "none",
-  borderRadius: 6,
-  background: "#111827",
-  color: "white",
-  fontSize: 14,
-  cursor: "pointer",
+  gap: 14,
+  width: 360,
+  maxWidth: "100%",
+  padding: 28,
 };
