@@ -12,9 +12,9 @@ Protocol (server → client, binary frames):
     0x01 → frontend dispatches to sendAudioDataImmediate (first chunk per utterance)
     0x00 → frontend dispatches to sendAudioData (subsequent chunks)
 
-TTFB budget (target ≤ 630 ms):
-  Embed (~80ms) + IVFFlat (~100ms) + OpenAI first token (~300ms)
-  + ElevenLabs first PCM chunk (~150ms) ≈ 630ms
+TTFB budget (target ≤ 450 ms):
+  Stories pre-loaded from data/stories.md at startup (0ms) + OpenAI first token (~300ms)
+  + ElevenLabs first PCM chunk (~150ms) ≈ 450ms
 
   Achievable only if LLM tokens are pipelined into TTS sentence-by-sentence
   rather than buffered to completion. _split_at_boundary + _flush below do that:
@@ -49,9 +49,11 @@ from app.db.engine import AsyncSessionLocal
 from app.db.models import Turn
 from app.deps import get_elevenlabs_cb, get_history_queue, get_openai_cb
 from app.llm.responder import generate_response
-from app.rag.embedder import embed_text
 from app.rag.prompt_builder import build_system_prompt
-from app.rag.retriever import retrieve_anecdotes
+
+# RAG — retained for re-adoption; see DECISION_LOG.md 05/05/2026
+# from app.rag.embedder import embed_text
+# from app.rag.retriever import retrieve_anecdotes
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -161,16 +163,18 @@ async def _handle_transcript(
     t0 = time.monotonic()
     first_byte_logged = False
 
-    try:
-        embedding = await openai_cb.call(lambda: embed_text(question))
-    except CircuitOpenError:
-        log.error("openai_cb_open_on_embed", session_id=str(session_id))
-        await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
-        return previous_response_id, sequence
+    # RAG path — retained for re-adoption; see DECISION_LOG.md 05/05/2026
+    # try:
+    #     embedding = await openai_cb.call(lambda: embed_text(question))
+    # except CircuitOpenError:
+    #     log.error("openai_cb_open_on_embed", session_id=str(session_id))
+    #     await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+    #     return previous_response_id, sequence
+    # async with AsyncSessionLocal() as db:
+    #     anecdotes = await retrieve_anecdotes(db, embedding)
+    # system_prompt = build_system_prompt(anecdotes)
 
-    async with AsyncSessionLocal() as db:
-        anecdotes = await retrieve_anecdotes(db, embedding)
-    system_prompt = build_system_prompt(anecdotes)
+    system_prompt = build_system_prompt()
 
     full_response = ""
     pending_text = ""
