@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     cb_failure_threshold: int = 5
     cb_recovery_timeout: float = 30.0
 
+    # Stories — static corpus loaded at startup; updated via PUT /admin/stories
+    stories_path: str = "data/stories.md"
+
     # App
     candidate_name: str = "Angel"
     pcm_chunk_bytes: int = 6000
