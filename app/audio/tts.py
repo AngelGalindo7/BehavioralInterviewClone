@@ -100,14 +100,15 @@ async def history_delete_worker(queue: asyncio.Queue[str]) -> None:
     client = _get_client()
     while True:
         item_id: str = await queue.get()
-        target_id: str | None = item_id
+        target_id: str = item_id
         try:
             if item_id == LATEST_HISTORY_SENTINEL:
                 resp = await client.history.get_all(page_size=1)
-                target_id = getattr(resp, "last_history_item_id", None) or None
-                if not target_id:
+                raw_id: str | None = getattr(resp, "last_history_item_id", None) or None
+                if not raw_id:
                     log.debug("tts_history_fallback_empty")
                     continue
+                target_id = raw_id
             await client.history.delete(history_item_id=target_id)
             log.info("tts_history_deleted", history_item_id=target_id)
         except Exception as exc:
