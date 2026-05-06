@@ -8,6 +8,12 @@ import {
 } from "../lib/adminApi";
 import { logout } from "../lib/auth";
 
+// RAG ingestion is currently inactive — stories are loaded from data/stories.md
+// at backend startup and injected as a static system prompt.
+// Set to true to restore the full RAG embed/retrieve pipeline.
+// See: docs/DECISION_LOG.md — 05/05/2026
+const RAG_ENABLED = false;
+
 export default function AdminPage() {
   const [items, setItems] = useState<AnecdoteSummary[]>([]);
   const [title, setTitle] = useState("");
@@ -26,7 +32,7 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    if (RAG_ENABLED) void refresh();
   }, [refresh]);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -87,7 +93,7 @@ export default function AdminPage() {
         <div>
           <h1 style={{ fontSize: 18, fontWeight: 600 }}>Stories</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 2 }}>
-            Manage the anecdotes that feed retrieval.
+            {RAG_ENABLED ? "Manage the anecdotes that feed retrieval." : "Static corpus mode — stories loaded from data/stories.md."}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -100,128 +106,146 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <form onSubmit={handleSubmit} className="surface" style={cardStyle}>
-        <label style={labelStyle}>
-          <span className="label">Title</span>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            disabled={busy}
-            placeholder="e.g. Resolved a production outage"
-            className="input"
-            required
-          />
-        </label>
-        <label style={labelStyle}>
-          <span className="label">Story (markdown — Situation / Task / Action / Result)</span>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            disabled={busy}
-            rows={14}
-            className="input"
-            style={{
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              fontSize: 13,
-              lineHeight: 1.55,
-              resize: "vertical",
-            }}
-            required
-          />
-        </label>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="submit"
-            disabled={busy || !title || !content}
-            className="btn btn-primary"
-          >
-            {busy ? "Saving…" : "Save story"}
-          </button>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            Same title overwrites the existing story.
-          </span>
-        </div>
-      </form>
-
-      {message && (
-        <div className="surface fade-in" style={msgStyle("var(--text)")}>
-          {message}
-        </div>
-      )}
-      {error && (
-        <div className="fade-in" style={errMsgStyle}>
-          {error}
-        </div>
-      )}
-
-      <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <h2 style={sectionHeading}>
-          Ingested stories
-          <span className="pill" style={{ marginLeft: 8 }}>{items.length}</span>
-        </h2>
-        {items.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>No stories yet.</p>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {items.map((item, i) => (
-              <li
-                key={item.source_file}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 14,
-                  padding: "10px 12px",
-                  borderTop: "1px solid var(--border)",
-                  borderBottom: i === items.length - 1 ? "1px solid var(--border)" : "none",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13.5,
-                      color: "var(--text)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {item.source_file}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                    {item.chunks} chunk(s) · {new Date(item.created_at).toLocaleString()}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDelete(item.source_file)}
-                  disabled={busy}
-                  className="btn btn-danger-ghost"
-                  style={{ padding: "5px 10px", fontSize: 12 }}
-                >
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="surface" style={cardStyle}>
-        <div>
-          <h2 style={sectionHeading}>Rebuild index</h2>
-          <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.5 }}>
-            Run this after a batch of edits — not after every save. Briefly pauses queries; do not run during a live interview.
+      {!RAG_ENABLED && (
+        <div className="surface" style={noticeStyle}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>RAG ingestion inactive</div>
+          <p style={{ fontSize: 12.5, color: "var(--text-muted)", margin: 0, lineHeight: 1.6 }}>
+            Stories are injected as a static system prompt loaded from{" "}
+            <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>data/stories.md</code>{" "}
+            at backend startup. To update stories, edit that file and redeploy.
+            To restore RAG embed/retrieve, set{" "}
+            <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>RAG_ENABLED = true</code>{" "}
+            in this file — see DECISION_LOG.md 05/05/2026.
           </p>
         </div>
-        <button
-          onClick={handleReindex}
-          disabled={reindexing}
-          className="btn btn-ghost"
-          style={{ alignSelf: "flex-start" }}
-        >
-          {reindexing ? "Rebuilding…" : "Rebuild IVFFlat index"}
-        </button>
-      </section>
+      )}
+
+      {RAG_ENABLED && (
+        <>
+          <form onSubmit={handleSubmit} className="surface" style={cardStyle}>
+            <label style={labelStyle}>
+              <span className="label">Title</span>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                disabled={busy}
+                placeholder="e.g. Resolved a production outage"
+                className="input"
+                required
+              />
+            </label>
+            <label style={labelStyle}>
+              <span className="label">Story (markdown — Situation / Task / Action / Result)</span>
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                disabled={busy}
+                rows={14}
+                className="input"
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  resize: "vertical",
+                }}
+                required
+              />
+            </label>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                type="submit"
+                disabled={busy || !title || !content}
+                className="btn btn-primary"
+              >
+                {busy ? "Saving…" : "Save story"}
+              </button>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Same title overwrites the existing story.
+              </span>
+            </div>
+          </form>
+
+          {message && (
+            <div className="surface fade-in" style={msgStyle("var(--text)")}>
+              {message}
+            </div>
+          )}
+          {error && (
+            <div className="fade-in" style={errMsgStyle}>
+              {error}
+            </div>
+          )}
+
+          <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <h2 style={sectionHeading}>
+              Ingested stories
+              <span className="pill" style={{ marginLeft: 8 }}>{items.length}</span>
+            </h2>
+            {items.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--text-muted)" }}>No stories yet.</p>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {items.map((item, i) => (
+                  <li
+                    key={item.source_file}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "10px 12px",
+                      borderTop: "1px solid var(--border)",
+                      borderBottom: i === items.length - 1 ? "1px solid var(--border)" : "none",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 13.5,
+                          color: "var(--text)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {item.source_file}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                        {item.chunks} chunk(s) · {new Date(item.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDelete(item.source_file)}
+                      disabled={busy}
+                      className="btn btn-danger-ghost"
+                      style={{ padding: "5px 10px", fontSize: 12 }}
+                    >
+                      Delete
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="surface" style={cardStyle}>
+            <div>
+              <h2 style={sectionHeading}>Rebuild index</h2>
+              <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.5 }}>
+                Run this after a batch of edits — not after every save. Briefly pauses queries; do not run during a live interview.
+              </p>
+            </div>
+            <button
+              onClick={handleReindex}
+              disabled={reindexing}
+              className="btn btn-ghost"
+              style={{ alignSelf: "flex-start" }}
+            >
+              {reindexing ? "Rebuilding…" : "Rebuild IVFFlat index"}
+            </button>
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -263,6 +287,11 @@ const sectionHeading: React.CSSProperties = {
   color: "var(--text)",
   display: "inline-flex",
   alignItems: "center",
+};
+
+const noticeStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  borderLeft: "3px solid var(--text-muted)",
 };
 
 const msgStyle = (color: string): React.CSSProperties => ({

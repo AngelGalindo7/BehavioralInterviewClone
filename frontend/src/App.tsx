@@ -1,17 +1,14 @@
-import AdminPage from "./components/AdminPage";
 import InterviewPage from "./components/InterviewPage";
 import LoginGate from "./components/LoginGate";
+
+// AdminPage and /admin route removed — stories are managed via data/stories.md.
+// AdminPage.tsx + adminApi.ts retained on disk for RAG re-adoption reference.
+// See: docs/DECISION_LOG.md — 05/05/2026
 
 export default function App() {
   return (
     <LoginGate>
-      <Router />
+      <InterviewPage />
     </LoginGate>
   );
-}
-
-function Router() {
-  const path = typeof window !== "undefined" ? window.location.pathname : "/";
-  if (path.startsWith("/admin")) return <AdminPage />;
-  return <InterviewPage />;
 }
