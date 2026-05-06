@@ -9,23 +9,53 @@ because rebuilding IVFFlat is heavy and shouldn't run on every save.
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.engine import engine
 from app.db.models import Anecdote
 from app.deps import get_db
 from app.rag.embedder import embed_texts
+from app.rag.prompt_builder import reload_stories
 from ingestion.chunker import chunk_text
 
 router = APIRouter()
 
 _MAX_TITLE_LEN = 200
 _MAX_CONTENT_BYTES = 50_000
+_MAX_STORIES_BYTES = 500_000  # 500 KB ceiling for the full corpus file
 _TITLE_SLUG_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+class StoriesContent(BaseModel):
+    content: str = Field(..., min_length=0)
+
+
+@router.get("/stories")
+async def get_stories() -> dict:
+    path = Path(settings.stories_path)
+    if not path.exists():
+        return {"content": ""}
+    return {"content": path.read_text(encoding="utf-8")}
+
+
+@router.put("/stories")
+async def save_stories(payload: StoriesContent) -> dict:
+    if len(payload.content.encode("utf-8")) > _MAX_STORIES_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Content exceeds {_MAX_STORIES_BYTES // 1024} KB cap",
+        )
+    path = Path(settings.stories_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload.content, encoding="utf-8")
+    reload_stories()
+    return {"status": "ok", "bytes_written": len(payload.content.encode("utf-8"))}
 
 
 class AnecdoteUpsert(BaseModel):
