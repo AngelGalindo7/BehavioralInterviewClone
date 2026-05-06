@@ -1,51 +1,29 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import {
-  deleteAnecdote,
-  listAnecdotes,
-  reindex,
-  upsertAnecdote,
-  type AnecdoteSummary,
-} from "../lib/adminApi";
+import { useEffect, useRef, useState } from "react";
+import { getStories, saveStories } from "../lib/adminApi";
 import { logout } from "../lib/auth";
 
-// RAG ingestion is currently inactive — stories are loaded from data/stories.md
-// at backend startup and injected as a static system prompt.
-// Set to true to restore the full RAG embed/retrieve pipeline.
-// See: docs/DECISION_LOG.md — 05/05/2026
-const RAG_ENABLED = false;
-
 export default function AdminPage() {
-  const [items, setItems] = useState<AnecdoteSummary[]>([]);
-  const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [reindexing, setReindexing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      setItems(await listAnecdotes());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (RAG_ENABLED) void refresh();
-  }, [refresh]);
+    getStories()
+      .then(setContent)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
+  }, []);
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSave = async () => {
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await upsertAnecdote(title, content);
-      setMessage(`Saved ${result.source_file} — ${result.chunks_inserted} chunk(s).`);
-      setTitle("");
-      setContent("");
-      await refresh();
+      await saveStories(content);
+      setMessage("Stories saved and reloaded.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -53,33 +31,17 @@ export default function AdminPage() {
     }
   };
 
-  const handleDelete = async (sourceFile: string) => {
-    if (!confirm(`Delete ${sourceFile}?`)) return;
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await deleteAnecdote(sourceFile);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleReindex = async () => {
-    setReindexing(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await reindex();
-      setMessage(`Index rebuilt in ${result.elapsed_ms} ms.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setReindexing(false);
-    }
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setContent((ev.target?.result as string) ?? "");
+      setMessage(null);
+      setError(null);
+    };
+    reader.readAsText(file, "utf-8");
+    e.target.value = "";
   };
 
   const handleLogout = async () => {
@@ -87,13 +49,15 @@ export default function AdminPage() {
     window.location.reload();
   };
 
+  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+
   return (
     <div style={pageStyle}>
       <header style={headerStyle}>
         <div>
           <h1 style={{ fontSize: 18, fontWeight: 600 }}>Stories</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 2 }}>
-            {RAG_ENABLED ? "Manage the anecdotes that feed retrieval." : "Static corpus mode — stories loaded from data/stories.md."}
+            Edit and save the full story corpus. Changes take effect on the next interview turn.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -106,152 +70,71 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {!RAG_ENABLED && (
-        <div className="surface" style={noticeStyle}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>RAG ingestion inactive</div>
-          <p style={{ fontSize: 12.5, color: "var(--text-muted)", margin: 0, lineHeight: 1.6 }}>
-            Stories are injected as a static system prompt loaded from{" "}
-            <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>data/stories.md</code>{" "}
-            at backend startup. To update stories, edit that file and redeploy.
-            To restore RAG embed/retrieve, set{" "}
-            <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>RAG_ENABLED = true</code>{" "}
-            in this file — see DECISION_LOG.md 05/05/2026.
-          </p>
+      <div className="surface" style={editorCard}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {loading ? "Loading…" : `${wordCount.toLocaleString()} words`}
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md,.txt"
+              style={{ display: "none" }}
+              onChange={handleFileUpload}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy || loading}
+              className="btn btn-ghost"
+              style={{ fontSize: 12.5, padding: "6px 12px" }}
+            >
+              Import file
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={busy || loading}
+              className="btn btn-primary"
+              style={{ fontSize: 12.5, padding: "6px 14px" }}
+            >
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          disabled={loading}
+          className="input"
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            resize: "vertical",
+            minHeight: 520,
+          }}
+          placeholder="Paste your stories here in markdown, or use Import file to upload a .md file."
+          spellCheck={false}
+        />
+      </div>
+
+      {message && (
+        <div className="surface fade-in" style={{ padding: "10px 12px", fontSize: 13 }}>
+          {message}
         </div>
       )}
-
-      {RAG_ENABLED && (
-        <>
-          <form onSubmit={handleSubmit} className="surface" style={cardStyle}>
-            <label style={labelStyle}>
-              <span className="label">Title</span>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                disabled={busy}
-                placeholder="e.g. Resolved a production outage"
-                className="input"
-                required
-              />
-            </label>
-            <label style={labelStyle}>
-              <span className="label">Story (markdown — Situation / Task / Action / Result)</span>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                disabled={busy}
-                rows={14}
-                className="input"
-                style={{
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 13,
-                  lineHeight: 1.55,
-                  resize: "vertical",
-                }}
-                required
-              />
-            </label>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <button
-                type="submit"
-                disabled={busy || !title || !content}
-                className="btn btn-primary"
-              >
-                {busy ? "Saving…" : "Save story"}
-              </button>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                Same title overwrites the existing story.
-              </span>
-            </div>
-          </form>
-
-          {message && (
-            <div className="surface fade-in" style={msgStyle("var(--text)")}>
-              {message}
-            </div>
-          )}
-          {error && (
-            <div className="fade-in" style={errMsgStyle}>
-              {error}
-            </div>
-          )}
-
-          <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <h2 style={sectionHeading}>
-              Ingested stories
-              <span className="pill" style={{ marginLeft: 8 }}>{items.length}</span>
-            </h2>
-            {items.length === 0 ? (
-              <p style={{ fontSize: 13, color: "var(--text-muted)" }}>No stories yet.</p>
-            ) : (
-              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {items.map((item, i) => (
-                  <li
-                    key={item.source_file}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 14,
-                      padding: "10px 12px",
-                      borderTop: "1px solid var(--border)",
-                      borderBottom: i === items.length - 1 ? "1px solid var(--border)" : "none",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 13.5,
-                          color: "var(--text)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {item.source_file}
-                      </div>
-                      <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                        {item.chunks} chunk(s) · {new Date(item.created_at).toLocaleString()}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleDelete(item.source_file)}
-                      disabled={busy}
-                      className="btn btn-danger-ghost"
-                      style={{ padding: "5px 10px", fontSize: 12 }}
-                    >
-                      Delete
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="surface" style={cardStyle}>
-            <div>
-              <h2 style={sectionHeading}>Rebuild index</h2>
-              <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.5 }}>
-                Run this after a batch of edits — not after every save. Briefly pauses queries; do not run during a live interview.
-              </p>
-            </div>
-            <button
-              onClick={handleReindex}
-              disabled={reindexing}
-              className="btn btn-ghost"
-              style={{ alignSelf: "flex-start" }}
-            >
-              {reindexing ? "Rebuilding…" : "Rebuild IVFFlat index"}
-            </button>
-          </section>
-        </>
+      {error && (
+        <div className="fade-in" style={errStyle}>
+          {error}
+        </div>
       )}
     </div>
   );
 }
 
 const pageStyle: React.CSSProperties = {
-  maxWidth: 720,
+  maxWidth: 860,
   margin: "0 auto",
   padding: "28px 24px 48px",
   display: "flex",
@@ -267,40 +150,14 @@ const headerStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 
-const cardStyle: React.CSSProperties = {
+const editorCard: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 12,
   padding: 16,
 };
 
-const labelStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-
-const sectionHeading: React.CSSProperties = {
-  fontSize: 13.5,
-  fontWeight: 600,
-  margin: 0,
-  color: "var(--text)",
-  display: "inline-flex",
-  alignItems: "center",
-};
-
-const noticeStyle: React.CSSProperties = {
-  padding: "14px 16px",
-  borderLeft: "3px solid var(--text-muted)",
-};
-
-const msgStyle = (color: string): React.CSSProperties => ({
-  padding: "10px 12px",
-  fontSize: 13,
-  color,
-});
-
-const errMsgStyle: React.CSSProperties = {
+const errStyle: React.CSSProperties = {
   padding: "10px 12px",
   borderRadius: 10,
   background: "var(--danger-soft)",
