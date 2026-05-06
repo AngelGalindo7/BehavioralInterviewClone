@@ -35,8 +35,5 @@ def lifespan_mocks():
     ``TestClient(app).__enter__()`` triggers the lifespan — so this is a
     fixture rather than an inline context manager.
     """
-    with (
-        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
-        patch("app.core.lifespan._warmup_ivfflat_index", new_callable=AsyncMock),
-    ):
+    with patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock):
         yield
