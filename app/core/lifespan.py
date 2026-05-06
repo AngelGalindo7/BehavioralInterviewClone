@@ -18,23 +18,21 @@ async def _verify_db_connection() -> None:
     log.info("db_connection_verified")
 
 
-async def _warmup_ivfflat_index() -> None:
-    """
-    Fire a dummy nearest-neighbour query so the OS page cache warms the IVFFlat
-    index before the first real interview request. Silently skips if table is empty.
-    """
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(
-                text(
-                    "SELECT 1 FROM anecdotes "
-                    "ORDER BY embedding <=> '[0.0]'::vector(1536) "
-                    "LIMIT 1"
-                )
-            )
-        log.info("ivfflat_index_warmed")
-    except Exception as exc:
-        log.warning("ivfflat_warmup_skipped", reason=str(exc))
+# RAG — IVFFlat warmup retained; uncomment if RAG is re-adopted.
+# See DECISION_LOG.md 05/05/2026
+# async def _warmup_ivfflat_index() -> None:
+#     try:
+#         async with engine.connect() as conn:
+#             await conn.execute(
+#                 text(
+#                     "SELECT 1 FROM anecdotes "
+#                     "ORDER BY embedding <=> '[0.0]'::vector(1536) "
+#                     "LIMIT 1"
+#                 )
+#             )
+#         log.info("ivfflat_index_warmed")
+#     except Exception as exc:
+#         log.warning("ivfflat_warmup_skipped", reason=str(exc))
 
 
 async def _tracemalloc_sampler() -> None:
@@ -66,7 +64,7 @@ async def lifespan(app: FastAPI):
     deps.history_delete_queue = asyncio.Queue()
 
     await _verify_db_connection()
-    await _warmup_ivfflat_index()
+    # await _warmup_ivfflat_index()  # RAG — see DECISION_LOG.md 05/05/2026
 
     history_task = asyncio.create_task(history_delete_worker(deps.history_delete_queue))
     tracemalloc_task = asyncio.create_task(_tracemalloc_sampler())
