@@ -30,29 +30,13 @@ os.environ.setdefault("SIMLI_API_KEY", "s-test")
 os.environ.setdefault("SIMLI_FACE_ID", "f-test")
 
 
-@pytest.fixture
-def fake_embedding() -> list[float]:
-    return [0.1] * 1536
-
-
-@pytest.fixture
-def fake_anecdotes() -> list[str]:
-    return ["I once led a project under tight deadlines."]
-
-
 @pytest.mark.asyncio
-async def test_transcript_produces_immediate_prefixed_binary_frames(fake_embedding, fake_anecdotes, auth_cookies):
+async def test_transcript_produces_immediate_prefixed_binary_frames(auth_cookies):
     """
     First binary frame after a transcript must carry the 0x01 immediate prefix
     so the frontend dispatches it via simliClient.sendAudioDataImmediate().
     """
     fake_pcm = bytes(6000)
-
-    async def _fake_embed(_text: str) -> list[float]:
-        return fake_embedding
-
-    async def _fake_retrieve(_session, _emb, **_kw) -> list[str]:
-        return fake_anecdotes
 
     async def _fake_generate(_q, _sp, _prev, _cb):
         # Single-sentence response — flushes once at end-of-stream.
@@ -62,12 +46,9 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(fake_embeddi
         yield fake_pcm
 
     with (
-        patch("app.api.ws_interview.embed_text", side_effect=_fake_embed),
-        patch("app.api.ws_interview.retrieve_anecdotes", side_effect=_fake_retrieve),
         patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
         patch("app.api.ws_interview.stream_tts_pcm", side_effect=_fake_tts),
         patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
-        patch("app.core.lifespan._warmup_ivfflat_index", new_callable=AsyncMock),
         patch("app.api.ws_interview.Turn"),
         patch("app.api.ws_interview.AsyncSessionLocal"),
     ):
@@ -100,10 +81,7 @@ async def test_skip_message_is_accepted_silently(auth_cookies):
     Backend now logs and discards skip — the frontend handles the avatar-buffer
     clear locally via simliClient.ClearBuffer(). No bytes should come back.
     """
-    with (
-        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
-        patch("app.core.lifespan._warmup_ivfflat_index", new_callable=AsyncMock),
-    ):
+    with patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock):
         from app.main import create_app
         app = create_app()
 
@@ -120,7 +98,7 @@ async def test_skip_message_is_accepted_silently(auth_cookies):
 
 
 @pytest.mark.asyncio
-async def test_disconnect_cancels_in_flight_openai_stream(fake_embedding, fake_anecdotes, auth_cookies):
+async def test_disconnect_cancels_in_flight_openai_stream(auth_cookies):
     """
     Closing the WebSocket while the OpenAI Responses stream is mid-flight must
     propagate CancelledError into the async-for so the upstream HTTP request is
@@ -129,12 +107,6 @@ async def test_disconnect_cancels_in_flight_openai_stream(fake_embedding, fake_a
     """
     cancellation_observed = threading.Event()
     fake_pcm = bytes(6000)
-
-    async def _fake_embed(_text: str) -> list[float]:
-        return fake_embedding
-
-    async def _fake_retrieve(_session, _emb, **_kw) -> list[str]:
-        return fake_anecdotes
 
     async def _fake_generate(_q, _sp, _prev, _cb):
         try:
@@ -149,12 +121,9 @@ async def test_disconnect_cancels_in_flight_openai_stream(fake_embedding, fake_a
         yield fake_pcm
 
     with (
-        patch("app.api.ws_interview.embed_text", side_effect=_fake_embed),
-        patch("app.api.ws_interview.retrieve_anecdotes", side_effect=_fake_retrieve),
         patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
         patch("app.api.ws_interview.stream_tts_pcm", side_effect=_fake_tts),
         patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
-        patch("app.core.lifespan._warmup_ivfflat_index", new_callable=AsyncMock),
         patch("app.api.ws_interview.Turn"),
         patch("app.api.ws_interview.AsyncSessionLocal"),
     ):
@@ -186,10 +155,7 @@ async def test_oversized_text_frame_is_dropped(auth_cookies):
     """
     from app.config import settings
 
-    with (
-        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
-        patch("app.core.lifespan._warmup_ivfflat_index", new_callable=AsyncMock),
-    ):
+    with patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock):
         from app.main import create_app
         app = create_app()
 
