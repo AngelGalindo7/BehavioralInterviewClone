@@ -9,6 +9,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.engine import Base
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class Anecdote(Base):
     __tablename__ = "anecdotes"
 
