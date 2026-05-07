@@ -92,31 +92,37 @@ async def _send_audio_chunks(
     `first_chunk_state["is_first"]` is mutated to False after the first send so
     later sentences within the same utterance use the buffered prefix.
     Returns (frames_sent, total_pcm_bytes_sent).
+
+    ElevenLabs frequently returns odd-length raw chunks. Slicing each chunk
+    independently would send Simli a frame ending on half a PCM16 sample, which
+    it decodes as a noise burst (static). The carry byte bridges chunk boundaries
+    so every WebSocket frame contains only complete 2-byte samples.
     """
     frames_sent = 0
     total_pcm_bytes = 0
     misaligned_frames = 0
     raw_chunk_index = 0
+    # Holds the orphaned first byte of a PCM16 sample when ElevenLabs emits an
+    # odd-length chunk; prepended to the next chunk before slicing.
+    carry = b""
 
     async for tts_bytes in pcm_iter:
         raw_len = len(tts_bytes)
-        raw_aligned = raw_len % 2 == 0
         log.debug(
             "ws_tts_raw_chunk_received",
             raw_chunk_index=raw_chunk_index,
             raw_bytes=raw_len,
-            is_pcm16_aligned=raw_aligned,
+            is_pcm16_aligned=raw_len % 2 == 0,
         )
-        if not raw_aligned:
-            log.warning(
-                "ws_tts_raw_chunk_misaligned_before_slice",
-                raw_chunk_index=raw_chunk_index,
-                raw_bytes=raw_len,
-                detail="odd-length ElevenLabs chunk will produce misaligned output chunks",
-            )
         raw_chunk_index += 1
 
-        for pcm_chunk in iter_pcm_chunks(tts_bytes, settings.pcm_chunk_bytes):
+        buf = carry + tts_bytes
+        aligned_len = len(buf) & ~1  # round down to nearest even byte count
+        carry = buf[aligned_len:]    # 0 or 1 byte carried to next iteration
+        if aligned_len == 0:
+            continue
+
+        for pcm_chunk in iter_pcm_chunks(buf[:aligned_len], settings.pcm_chunk_bytes):
             pcm_len = len(pcm_chunk)
             is_immediate = first_chunk_state["is_first"]
             if is_immediate:
@@ -125,16 +131,14 @@ async def _send_audio_chunks(
             else:
                 payload = AUDIO_NORMAL_PREFIX + pcm_chunk
 
-            is_pcm_aligned = pcm_len % 2 == 0
-            if not is_pcm_aligned:
+            if pcm_len % 2 != 0:
                 misaligned_frames += 1
                 log.warning(
                     "ws_send_frame_misaligned",
                     frame_index=frames_sent,
                     pcm_bytes=pcm_len,
-                    total_payload_bytes=len(payload),
                     is_immediate=is_immediate,
-                    detail="odd-length PCM frame sent to browser — Simli will decode a broken half-sample, causing static",
+                    detail="odd-length frame despite carry buffer — logic error",
                 )
             else:
                 log.debug(
@@ -144,6 +148,24 @@ async def _send_audio_chunks(
                     is_immediate=is_immediate,
                 )
 
+            await websocket.send_bytes(payload)
+            frames_sent += 1
+            total_pcm_bytes += pcm_len
+
+    # ElevenLabs total is always even (confirmed by logs) but pad defensively.
+    # A zero byte = digital silence for the orphaned half-sample.
+    if carry:
+        log.info(
+            "ws_carry_byte_padded",
+            detail="ElevenLabs stream ended on odd byte; padded final half-sample with silence",
+        )
+        padded = carry + b"\x00"
+        for pcm_chunk in iter_pcm_chunks(padded, settings.pcm_chunk_bytes):
+            pcm_len = len(pcm_chunk)
+            is_immediate = first_chunk_state["is_first"]
+            payload = (AUDIO_IMMEDIATE_PREFIX if is_immediate else AUDIO_NORMAL_PREFIX) + pcm_chunk
+            if is_immediate:
+                first_chunk_state["is_first"] = False
             await websocket.send_bytes(payload)
             frames_sent += 1
             total_pcm_bytes += pcm_len
