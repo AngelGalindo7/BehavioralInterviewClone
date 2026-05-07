@@ -181,14 +181,37 @@ async def _handle_transcript(
     last_response_id = previous_response_id or ""
     first_chunk_state = {"is_first": True}
 
+    flush_index = 0
+    flush_end_time: float | None = None
+
     async def _flush(text_to_speak: str) -> None:
-        nonlocal first_byte_logged
+        nonlocal first_byte_logged, flush_index, flush_end_time
         if not text_to_speak.strip():
             return
+        gap_ms = round((time.monotonic() - flush_end_time) * 1000, 1) if flush_end_time else None
+        log.info(
+            "tts_flush_start",
+            session_id=str(session_id),
+            sequence=sequence,
+            flush_index=flush_index,
+            chars=len(text_to_speak),
+            text_preview=text_to_speak[:60],
+            inter_flush_gap_ms=gap_ms,
+        )
+        flush_index += 1
+        t_flush = time.monotonic()
         await _send_audio_chunks(
             websocket,
             stream_tts_pcm(text_to_speak, history_queue),
             first_chunk_state,
+        )
+        flush_end_time = time.monotonic()
+        log.info(
+            "tts_flush_done",
+            session_id=str(session_id),
+            sequence=sequence,
+            flush_index=flush_index - 1,
+            duration_ms=round((flush_end_time - t_flush) * 1000, 1),
         )
         if not first_byte_logged:
             first_byte_logged = True
