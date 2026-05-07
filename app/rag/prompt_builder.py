@@ -1,6 +1,10 @@
 import os
 
+import structlog
+
 from app.config import settings
+
+log = structlog.get_logger()
 
 _SYSTEM_TEMPLATE = """\
 You are {candidate_name}, in a live job interview. Speak in first person as yourself.
@@ -58,8 +62,14 @@ def _get_stories() -> str:
         if mtime != _stories_mtime:
             _stories_cache = _read_stories_file(settings.stories_path)
             _stories_mtime = mtime
-    except OSError:
-        pass
+            log.info(
+                "stories_loaded",
+                path=settings.stories_path,
+                chars=len(_stories_cache),
+                sections=_stories_cache.count("\n## "),
+            )
+    except OSError as exc:
+        log.error("stories_load_failed", path=settings.stories_path, error=str(exc))
     return _stories_cache
 
 
@@ -68,6 +78,12 @@ def reload_stories() -> None:
     global _stories_cache, _stories_mtime
     _stories_cache = _read_stories_file(settings.stories_path)
     _stories_mtime = os.path.getmtime(settings.stories_path)
+    log.info(
+        "stories_reloaded",
+        path=settings.stories_path,
+        chars=len(_stories_cache),
+        sections=_stories_cache.count("\n## "),
+    )
 
 
 def build_system_prompt(candidate_name: str | None = None) -> str:
