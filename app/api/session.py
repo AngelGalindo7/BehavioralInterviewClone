@@ -38,7 +38,7 @@ async def end_session(
         await db.execute(
             update(InterviewSession)
             .where(InterviewSession.id == session_id)
-            .values(ended_at=datetime.now(timezone.utc))
+            .values(ended_at=datetime.now(timezone.utc).replace(tzinfo=None))
         )
         await db.commit()
     except HTTPException:
