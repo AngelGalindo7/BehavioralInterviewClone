@@ -32,6 +32,28 @@ async def _load_stories_from_db() -> None:
             log.info("stories_not_found_in_db", detail="no stories row yet — corpus empty until first save")
 
 
+def _prewarm_external_clients() -> None:
+    """
+    Instantiate the OpenAI and ElevenLabs SDK singletons at startup so the first
+    interview turn doesn't pay the lazy module-import cost. Constructors are
+    cheap and do not make network calls; the actual TLS handshake still happens
+    on the first request, but module import + class init is amortised here.
+    """
+    from app.audio.tts import _get_client as _get_elevenlabs_client
+    from app.llm.responder import _get_client as _get_openai_client
+
+    try:
+        _get_openai_client()
+        log.info("openai_client_prewarmed")
+    except Exception as exc:
+        log.warning("openai_client_prewarm_failed", error=str(exc))
+    try:
+        _get_elevenlabs_client()
+        log.info("elevenlabs_client_prewarmed")
+    except Exception as exc:
+        log.warning("elevenlabs_client_prewarm_failed", error=str(exc))
+
+
 # RAG — IVFFlat warmup retained; uncomment if RAG is re-adopted.
 # See DECISION_LOG.md 05/05/2026
 # async def _warmup_ivfflat_index() -> None:
@@ -79,6 +101,7 @@ async def lifespan(app: FastAPI):
 
     await _verify_db_connection()
     await _load_stories_from_db()
+    _prewarm_external_clients()
     # await _warmup_ivfflat_index()  # RAG — see DECISION_LOG.md 05/05/2026
 
     history_task = asyncio.create_task(history_delete_worker(deps.history_delete_queue))
