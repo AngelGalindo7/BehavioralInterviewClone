@@ -64,7 +64,6 @@ async def stream_tts_pcm(
             text=text,
             model_id=settings.elevenlabs_model_id,
             output_format=settings.elevenlabs_output_format,
-            optimize_streaming_latency=4,
         ):
             if isinstance(chunk, bytes):
                 yield chunk
