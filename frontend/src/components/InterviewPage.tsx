@@ -6,9 +6,13 @@ import { destroyAvatar, initSimliAvatar, interruptAvatar, sendAudioToAvatar } fr
 import {
   isSpeechRecognitionSupported,
   startSpeechRecognition,
-  type SpeechRecognition,
+  type RecognitionHandle,
 } from "../lib/speechRecognition";
 import { InterviewWebSocket } from "../lib/wsClient";
+
+// Fire onFinal after this many ms of silence after the last interim result
+// instead of waiting for Chrome's internal end-of-speech timer (~700–1200 ms).
+const STT_SILENCE_FALLBACK_MS = 600;
 
 type Phase = "landing" | "preview" | "running";
 
@@ -26,7 +30,7 @@ export default function InterviewPage() {
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<InterviewWebSocket | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<RecognitionHandle | null>(null);
   const avatarRef = useRef<{ video: HTMLVideoElement | null; audio: HTMLAudioElement | null }>(null);
 
   useEffect(() => {
@@ -107,11 +111,15 @@ export default function InterviewPage() {
         console.error("Speech recognition error:", err);
       },
       (interim) => setInterimText(interim),
+      { silenceFallbackMs: STT_SILENCE_FALLBACK_MS },
     );
   }, [avatarReady]);
 
+  // Stop button = "Send now": flushes the latest interim transcript instead
+  // of waiting for Chrome's isFinal. If no interim has arrived yet, falls back
+  // to a plain stop() and we clear listening state ourselves.
   const handleStopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    recognitionRef.current?.commitNow();
     recognitionRef.current = null;
     setIsListening(false);
     setInterimText("");
@@ -129,7 +137,7 @@ export default function InterviewPage() {
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     try {
-      recognition?.abort();
+      recognition?.stop();
     } catch {
       // recognition may already be stopped
     }
