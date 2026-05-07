@@ -63,6 +63,10 @@ _FALLBACK_PCM = bytes(settings.pcm_chunk_bytes)
 # Sentence-ending punctuation followed by whitespace (or EOL). The lookahead
 # avoids matching decimals like "3.14"; "e.g. " false-positives are tolerable.
 _SENTENCE_BOUNDARY = re.compile(r"[.!?](?=\s)|[.!?]$")
+# Eager boundary used only on the FIRST flush of a turn. Adds clause-level
+# punctuation (comma, semicolon, colon) so a short opener like "Sure, " can
+# fire TTS immediately instead of waiting for a full sentence.
+_FIRST_FLUSH_BOUNDARY = re.compile(r"[.!?,;:](?=\s)|[.!?,;:]$")
 
 
 def _split_at_boundary(text: str, max_chars: int) -> tuple[str, str]:
@@ -80,6 +84,24 @@ def _split_at_boundary(text: str, max_chars: int) -> tuple[str, str]:
     if len(text) >= max_chars:
         return text, ""
     return "", text
+
+
+def _split_at_first_flush_boundary(text: str, min_chars: int) -> tuple[str, str]:
+    """
+    First-flush variant: return (to_flush, remaining) only once *text* has at
+    least *min_chars* characters AND a clause/sentence boundary has been seen.
+    Cuts at the LATEST boundary in range so the flush carries as much text as
+    possible without exceeding it. Returns ("", text) until both conditions hold.
+    """
+    if len(text) < min_chars:
+        return "", text
+    last_match = None
+    for m in _FIRST_FLUSH_BOUNDARY.finditer(text):
+        last_match = m
+    if last_match is None:
+        return "", text
+    end = last_match.end()
+    return text[:end], text[end:].lstrip()
 
 
 async def _send_audio_chunks(
@@ -266,6 +288,10 @@ async def _handle_transcript(
         nonlocal first_byte_logged, flush_index, flush_end_time
         if not text_to_speak.strip():
             return
+        # CB check moved here from the pre-LLM position. Lets OpenAI streaming
+        # begin without waiting on the breaker lock, and means each flush is
+        # independently breaker-aware rather than only the first.
+        await elevenlabs_cb.check()
         gap_ms = round((time.monotonic() - flush_end_time) * 1000, 1) if flush_end_time else None
         if gap_ms is not None and gap_ms > 50:
             log.warning(
@@ -313,7 +339,6 @@ async def _handle_transcript(
             )
 
     try:
-        await elevenlabs_cb.check()
         async for delta, resp_id in generate_response(
             question, system_prompt, previous_response_id, openai_cb
         ):
@@ -321,9 +346,14 @@ async def _handle_transcript(
             pending_text += delta
             if resp_id:
                 last_response_id = resp_id
-            to_flush, pending_text = _split_at_boundary(
-                pending_text, settings.sentence_boundary_max_chars
-            )
+            if first_byte_logged:
+                to_flush, pending_text = _split_at_boundary(
+                    pending_text, settings.sentence_boundary_max_chars
+                )
+            else:
+                to_flush, pending_text = _split_at_first_flush_boundary(
+                    pending_text, settings.first_flush_min_chars
+                )
             if to_flush:
                 await _flush(to_flush)
         if pending_text.strip():

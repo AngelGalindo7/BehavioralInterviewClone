@@ -114,7 +114,12 @@ async def test_disconnect_cancels_in_flight_openai_stream(auth_cookies):
 
     async def _fake_generate(_q, _sp, _prev, _cb):
         try:
-            yield "First sentence.", "resp-1"
+            # Must exceed settings.first_flush_min_chars (40) AND contain a
+            # clause/sentence boundary so the first-flush splitter fires
+            # immediately — otherwise the sleep below runs to completion before
+            # any flush, the test client never receives bytes, and the disconnect
+            # check happens after the stream has already finished.
+            yield "First sentence runs long enough to flush eagerly.", "resp-1"
             await asyncio.sleep(30)
             yield "second", "resp-1"
         except asyncio.CancelledError:

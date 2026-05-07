@@ -54,6 +54,10 @@ class Settings(BaseSettings):
 
     # LLM → TTS pipelining
     sentence_boundary_max_chars: int = 200
+    # First flush of a turn fires on the earlier of (clause boundary, this many
+    # chars). Short threshold trades a little prosody on the opener for ~200–400 ms
+    # less audible TTFB. Subsequent flushes still wait for sentence boundaries.
+    first_flush_min_chars: int = 40
 
     model_config = SettingsConfigDict(
         env_file=".env",
