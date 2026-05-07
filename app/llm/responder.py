@@ -1,11 +1,9 @@
 """
 OpenAI Responses API wrapper.
 
-Uses the newer Responses API (not Chat Completions) for two reasons:
-  1. previous_response_id allows stateful multi-turn chaining without re-sending
-     the entire message history on each request, reducing network payload size.
-  2. store=False ensures OpenAI does not persist this conversation server-side,
-     approximating Zero Data Retention for the sensitive behavioural content.
+Uses the newer Responses API (not Chat Completions) for stateful multi-turn
+chaining via previous_response_id, avoiding re-sending the full message history
+on each request.
 """
 from collections.abc import AsyncIterator
 
@@ -46,7 +44,6 @@ async def generate_response(
             model=settings.openai_response_model,
             instructions=system_prompt,
             input=question,
-            store=False,  # ZDR — no server-side retention of behavioural data
             stream=True,
         )
         if previous_response_id:

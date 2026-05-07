@@ -147,8 +147,8 @@ async def test_generate_response_omits_previous_response_id_when_none():
 
 
 @pytest.mark.asyncio
-async def test_generate_response_enforces_store_false():
-    """ZDR requirement: store=False must always be sent."""
+async def test_generate_response_omits_store():
+    """store must not be sent — store=False breaks previous_response_id chaining."""
     cb = CircuitBreaker("test")
     stream = _FakeStream(_DeltaEvent("z"))
 
@@ -159,7 +159,7 @@ async def test_generate_response_enforces_store_false():
         _ = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
 
     call_kwargs = create_mock.call_args.kwargs
-    assert call_kwargs.get("store") is False
+    assert "store" not in call_kwargs
 
 
 @pytest.mark.asyncio
