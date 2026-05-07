@@ -86,20 +86,76 @@ async def _send_audio_chunks(
     websocket: WebSocket,
     pcm_iter: AsyncIterator[bytes],
     first_chunk_state: dict,
-) -> None:
+) -> tuple[int, int]:
     """
     Forward chunked PCM to the browser with the 1-byte dispatch prefix.
     `first_chunk_state["is_first"]` is mutated to False after the first send so
     later sentences within the same utterance use the buffered prefix.
+    Returns (frames_sent, total_pcm_bytes_sent).
     """
+    frames_sent = 0
+    total_pcm_bytes = 0
+    misaligned_frames = 0
+    raw_chunk_index = 0
+
     async for tts_bytes in pcm_iter:
+        raw_len = len(tts_bytes)
+        raw_aligned = raw_len % 2 == 0
+        log.debug(
+            "ws_tts_raw_chunk_received",
+            raw_chunk_index=raw_chunk_index,
+            raw_bytes=raw_len,
+            is_pcm16_aligned=raw_aligned,
+        )
+        if not raw_aligned:
+            log.warning(
+                "ws_tts_raw_chunk_misaligned_before_slice",
+                raw_chunk_index=raw_chunk_index,
+                raw_bytes=raw_len,
+                detail="odd-length ElevenLabs chunk will produce misaligned output chunks",
+            )
+        raw_chunk_index += 1
+
         for pcm_chunk in iter_pcm_chunks(tts_bytes, settings.pcm_chunk_bytes):
-            if first_chunk_state["is_first"]:
+            pcm_len = len(pcm_chunk)
+            is_immediate = first_chunk_state["is_first"]
+            if is_immediate:
                 payload = AUDIO_IMMEDIATE_PREFIX + pcm_chunk
                 first_chunk_state["is_first"] = False
             else:
                 payload = AUDIO_NORMAL_PREFIX + pcm_chunk
+
+            is_pcm_aligned = pcm_len % 2 == 0
+            if not is_pcm_aligned:
+                misaligned_frames += 1
+                log.warning(
+                    "ws_send_frame_misaligned",
+                    frame_index=frames_sent,
+                    pcm_bytes=pcm_len,
+                    total_payload_bytes=len(payload),
+                    is_immediate=is_immediate,
+                    detail="odd-length PCM frame sent to browser — Simli will decode a broken half-sample, causing static",
+                )
+            else:
+                log.debug(
+                    "ws_send_frame",
+                    frame_index=frames_sent,
+                    pcm_bytes=pcm_len,
+                    is_immediate=is_immediate,
+                )
+
             await websocket.send_bytes(payload)
+            frames_sent += 1
+            total_pcm_bytes += pcm_len
+
+    log.info(
+        "ws_audio_chunks_sent",
+        frames_sent=frames_sent,
+        total_pcm_bytes=total_pcm_bytes,
+        misaligned_frames=misaligned_frames,
+        is_total_aligned=total_pcm_bytes % 2 == 0,
+    )
+    return frames_sent, total_pcm_bytes
 
 
 async def _persist_turn(
@@ -189,6 +245,15 @@ async def _handle_transcript(
         if not text_to_speak.strip():
             return
         gap_ms = round((time.monotonic() - flush_end_time) * 1000, 1) if flush_end_time else None
+        if gap_ms is not None and gap_ms > 50:
+            log.warning(
+                "tts_inter_flush_gap_large",
+                session_id=str(session_id),
+                sequence=sequence,
+                flush_index=flush_index,
+                inter_flush_gap_ms=gap_ms,
+                detail="gap between sentence flushes > 50 ms — ElevenLabs silence padding may cause audible double-silence or pop",
+            )
         log.info(
             "tts_flush_start",
             session_id=str(session_id),
@@ -200,7 +265,7 @@ async def _handle_transcript(
         )
         flush_index += 1
         t_flush = time.monotonic()
-        await _send_audio_chunks(
+        frames_sent, total_pcm_bytes = await _send_audio_chunks(
             websocket,
             stream_tts_pcm(text_to_speak, history_queue),
             first_chunk_state,
@@ -212,6 +277,9 @@ async def _handle_transcript(
             sequence=sequence,
             flush_index=flush_index - 1,
             duration_ms=round((flush_end_time - t_flush) * 1000, 1),
+            frames_sent=frames_sent,
+            total_pcm_bytes=total_pcm_bytes,
+            is_total_pcm_aligned=total_pcm_bytes % 2 == 0,
         )
         if not first_byte_logged:
             first_byte_logged = True

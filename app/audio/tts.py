@@ -26,7 +26,7 @@ from elevenlabs.client import AsyncElevenLabs
 
 from app.config import settings
 
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
 LATEST_HISTORY_SENTINEL = "__LATEST__"
 
@@ -57,6 +57,10 @@ async def stream_tts_pcm(
     client = _get_client()
     history_item_id: str | None = None
     completed_normally = False
+    chunk_index = 0
+    cumulative_bytes = 0
+
+    log.debug("tts_stream_start", text_len=len(text), text_preview=text[:60])
 
     try:
         async for chunk in client.text_to_speech.convert_as_stream(
@@ -65,16 +69,45 @@ async def stream_tts_pcm(
             model_id=settings.elevenlabs_model_id,
             output_format=settings.elevenlabs_output_format,
         ):
+            audio_bytes: bytes | None = None
             if isinstance(chunk, bytes):
-                yield chunk
+                audio_bytes = chunk
             elif hasattr(chunk, "audio") and chunk.audio:
-                yield chunk.audio
+                audio_bytes = chunk.audio
+
+            if audio_bytes is not None:
+                chunk_len = len(audio_bytes)
+                is_aligned = chunk_len % 2 == 0
+                cumulative_bytes += chunk_len
+                log.debug(
+                    "tts_raw_chunk",
+                    chunk_index=chunk_index,
+                    chunk_bytes=chunk_len,
+                    is_pcm16_aligned=is_aligned,
+                    cumulative_bytes=cumulative_bytes,
+                )
+                if not is_aligned:
+                    log.warning(
+                        "tts_raw_chunk_misaligned",
+                        chunk_index=chunk_index,
+                        chunk_bytes=chunk_len,
+                        cumulative_bytes=cumulative_bytes,
+                        detail="odd-length ElevenLabs chunk breaks PCM16 sample boundaries — likely cause of static",
+                    )
+                chunk_index += 1
+                yield audio_bytes
 
             if history_item_id is None and hasattr(chunk, "alignment") and chunk.alignment:
                 item_id = getattr(chunk.alignment, "history_item_id", None)
                 if item_id:
                     history_item_id = item_id
         completed_normally = True
+        log.debug(
+            "tts_stream_complete",
+            total_chunks=chunk_index,
+            total_bytes=cumulative_bytes,
+            is_total_pcm16_aligned=cumulative_bytes % 2 == 0,
+        )
     finally:
         if history_item_id:
             with contextlib.suppress(asyncio.QueueFull):
