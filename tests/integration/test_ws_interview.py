@@ -49,6 +49,7 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(auth_cookies
         patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
         patch("app.api.ws_interview.stream_tts_pcm", side_effect=_fake_tts),
         patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
         patch("app.api.ws_interview.Turn"),
         patch("app.api.ws_interview.AsyncSessionLocal"),
     ):
@@ -81,7 +82,10 @@ async def test_skip_message_is_accepted_silently(auth_cookies):
     Backend now logs and discards skip — the frontend handles the avatar-buffer
     clear locally via simliClient.ClearBuffer(). No bytes should come back.
     """
-    with patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock):
+    with (
+        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
+    ):
         from app.main import create_app
         app = create_app()
 
@@ -124,6 +128,7 @@ async def test_disconnect_cancels_in_flight_openai_stream(auth_cookies):
         patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
         patch("app.api.ws_interview.stream_tts_pcm", side_effect=_fake_tts),
         patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
         patch("app.api.ws_interview.Turn"),
         patch("app.api.ws_interview.AsyncSessionLocal"),
     ):
@@ -155,7 +160,10 @@ async def test_oversized_text_frame_is_dropped(auth_cookies):
     """
     from app.config import settings
 
-    with patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock):
+    with (
+        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
+    ):
         from app.main import create_app
         app = create_app()
 
