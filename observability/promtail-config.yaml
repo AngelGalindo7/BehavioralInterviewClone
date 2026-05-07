@@ -15,6 +15,11 @@ scrape_configs:
       labels:
         job: behavioral-dummy
         host: ec2-arm
+    relabel_configs:
+      # Only ship entries from the behavioral-dummy systemd service unit
+      - source_labels: [__journal__systemd_unit]
+        regex: behavioral-dummy\.service
+        action: keep
     pipeline_stages:
       # Parse structlog JSON lines emitted by FastAPI
       - json:
