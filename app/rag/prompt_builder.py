@@ -1,5 +1,3 @@
-import os
-
 import structlog
 
 from app.config import settings
@@ -38,57 +36,22 @@ rather than making something up.
 --- END EXPERIENCES ---
 """
 
-
-def _read_stories_file(path: str) -> str:
-    text = open(path, encoding="utf-8").read()
-    # Strip YAML frontmatter if present
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            text = parts[2]
-    return text.strip()
-
-
-# mtime-based hot-reload: both Uvicorn workers pick up file changes on next
-# build_system_prompt() call without a restart. os.stat() adds ~0.1ms per call.
+# In-memory cache — populated from RDS on startup (lifespan) and updated by
+# PUT /admin/stories. Each Uvicorn worker holds its own copy; the writing worker
+# updates immediately, the other worker picks up the new value on next restart
+# (acceptable for a single-user deployment where story edits are rare).
 _stories_cache: str = ""
-_stories_mtime: float = 0.0
 
 
-def _get_stories() -> str:
-    global _stories_cache, _stories_mtime
-    try:
-        mtime = os.path.getmtime(settings.stories_path)
-        if mtime != _stories_mtime:
-            _stories_cache = _read_stories_file(settings.stories_path)
-            _stories_mtime = mtime
-            log.info(
-                "stories_loaded",
-                path=settings.stories_path,
-                chars=len(_stories_cache),
-                sections=_stories_cache.count("\n## "),
-            )
-    except OSError as exc:
-        log.error("stories_load_failed", path=settings.stories_path, error=str(exc))
-    return _stories_cache
-
-
-def reload_stories() -> None:
-    """Force an immediate reload for the calling worker. Called by PUT /admin/stories."""
-    global _stories_cache, _stories_mtime
-    _stories_cache = _read_stories_file(settings.stories_path)
-    _stories_mtime = os.path.getmtime(settings.stories_path)
-    log.info(
-        "stories_reloaded",
-        path=settings.stories_path,
-        chars=len(_stories_cache),
-        sections=_stories_cache.count("\n## "),
-    )
+def set_stories_cache(text: str) -> None:
+    global _stories_cache
+    _stories_cache = text
+    log.info("stories_cache_updated", chars=len(text), sections=text.count("\n## "))
 
 
 def build_system_prompt(candidate_name: str | None = None) -> str:
     name = candidate_name or settings.candidate_name
-    return _SYSTEM_TEMPLATE.format(candidate_name=name, stories=_get_stories())
+    return _SYSTEM_TEMPLATE.format(candidate_name=name, stories=_stories_cache)
 
 
 # RAG path — retained for re-adoption; see DECISION_LOG.md 05/05/2026

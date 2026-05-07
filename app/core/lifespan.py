@@ -18,6 +18,20 @@ async def _verify_db_connection() -> None:
     log.info("db_connection_verified")
 
 
+async def _load_stories_from_db() -> None:
+    from app.db.engine import AsyncSessionLocal
+    from app.db.models import AppSetting
+    from app.rag.prompt_builder import set_stories_cache
+
+    async with AsyncSessionLocal() as db:
+        row = await db.get(AppSetting, "stories")
+        if row:
+            set_stories_cache(row.value)
+            log.info("stories_loaded_from_db", chars=len(row.value))
+        else:
+            log.info("stories_not_found_in_db", detail="no stories row yet — corpus empty until first save")
+
+
 # RAG — IVFFlat warmup retained; uncomment if RAG is re-adopted.
 # See DECISION_LOG.md 05/05/2026
 # async def _warmup_ivfflat_index() -> None:
@@ -64,6 +78,7 @@ async def lifespan(app: FastAPI):
     deps.history_delete_queue = asyncio.Queue()
 
     await _verify_db_connection()
+    await _load_stories_from_db()
     # await _warmup_ivfflat_index()  # RAG — see DECISION_LOG.md 05/05/2026
 
     history_task = asyncio.create_task(history_delete_worker(deps.history_delete_queue))

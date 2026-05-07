@@ -5,23 +5,24 @@ outage" → "resolving-the-outage.md"), stored as the `source_file` column on
 every chunk row. PUT semantics: re-uploading a story with the same title
 deletes its existing chunks and reinserts. Reindex is a separate endpoint
 because rebuilding IVFFlat is heavy and shouldn't run on every save.
+
+Stories text is persisted in the app_settings table (key="stories") so it
+survives EC2 redeployments. The in-memory prompt cache is updated on every PUT.
 """
 import re
 import time
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.db.engine import engine
-from app.db.models import Anecdote
+from app.db.models import Anecdote, AppSetting
 from app.deps import get_db
 from app.rag.embedder import embed_texts
-from app.rag.prompt_builder import reload_stories
+from app.rag.prompt_builder import set_stories_cache
 from ingestion.chunker import chunk_text
 
 router = APIRouter()
@@ -37,24 +38,28 @@ class StoriesContent(BaseModel):
 
 
 @router.get("/stories")
-async def get_stories() -> dict:
-    path = Path(settings.stories_path)
-    if not path.exists():
-        return {"content": ""}
-    return {"content": path.read_text(encoding="utf-8")}
+async def get_stories(db: AsyncSession = Depends(get_db)) -> dict:
+    row = await db.get(AppSetting, "stories")
+    return {"content": row.value if row else ""}
 
 
 @router.put("/stories")
-async def save_stories(payload: StoriesContent) -> dict:
+async def save_stories(
+    payload: StoriesContent,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     if len(payload.content.encode("utf-8")) > _MAX_STORIES_BYTES:
         raise HTTPException(
             status_code=413,
             detail=f"Content exceeds {_MAX_STORIES_BYTES // 1024} KB cap",
         )
-    path = Path(settings.stories_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload.content, encoding="utf-8")
-    reload_stories()
+    row = await db.get(AppSetting, "stories")
+    if row:
+        row.value = payload.content
+    else:
+        db.add(AppSetting(key="stories", value=payload.content))
+    await db.commit()
+    set_stories_cache(payload.content)
     return {"status": "ok", "bytes_written": len(payload.content.encode("utf-8"))}
 
 
