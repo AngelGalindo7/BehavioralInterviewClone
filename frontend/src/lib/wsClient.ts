@@ -16,6 +16,10 @@ export type AudioHandler = (pcm: Uint8Array, immediate: boolean) => void;
 
 const MAX_BACKOFF_MS = 30_000;
 
+// Audio frame diagnostic counters — reset per connection.
+let _frameCount = 0;
+let _lastFrameTs = 0;
+
 export class InterviewWebSocket {
   private ws: WebSocket | null = null;
   private sessionId: string;
@@ -45,7 +49,10 @@ export class InterviewWebSocket {
 
     this.ws.onopen = () => {
       this.attempt = 0;
+      _frameCount = 0;
+      _lastFrameTs = 0;
       this.onStatus("connected");
+      console.log("[AUDIO-WS] connected, diagnostic counters reset");
       while (this.outboundQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
         const payload = this.outboundQueue.shift()!;
         this.ws.send(payload);
@@ -53,10 +60,37 @@ export class InterviewWebSocket {
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
-      if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 2) return;
+      if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 2) {
+        console.warn("[AUDIO-WS] received non-audio or too-small frame, byteLength:", event.data instanceof ArrayBuffer ? event.data.byteLength : typeof event.data);
+        return;
+      }
       const view = new Uint8Array(event.data);
       const immediate = view[0] === 0x01;
-      this.onAudio(view.subarray(1), immediate);
+      const pcm = view.subarray(1);
+      const pcmLen = pcm.byteLength;
+      const isAligned = pcmLen % 2 === 0;
+      const now = performance.now();
+      const gapMs = _lastFrameTs > 0 ? now - _lastFrameTs : null;
+      _lastFrameTs = now;
+
+      if (!isAligned) {
+        console.error(
+          `[AUDIO-WS] MISALIGNED FRAME #${_frameCount}: pcmLen=${pcmLen} (odd) — broken PCM16 sample, likely cause of static. immediate=${immediate}`
+        );
+      } else {
+        console.debug(
+          `[AUDIO-WS] frame #${_frameCount}: pcmLen=${pcmLen} immediate=${immediate} gapMs=${gapMs !== null ? gapMs.toFixed(1) : "first"}`
+        );
+      }
+
+      if (gapMs !== null && gapMs > 200) {
+        console.warn(
+          `[AUDIO-WS] large gap before frame #${_frameCount}: ${gapMs.toFixed(1)} ms — may cause Simli underrun → static`
+        );
+      }
+
+      _frameCount++;
+      this.onAudio(pcm, immediate);
     };
 
     this.ws.onclose = () => {
