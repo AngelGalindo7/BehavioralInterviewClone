@@ -27,6 +27,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY alembic.ini .
 COPY app/ ./app/
 COPY ingestion/ ./ingestion/
+COPY data/ ./data/
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

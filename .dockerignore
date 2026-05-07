@@ -8,6 +8,7 @@ observability/
 docs/
 infra/
 *.md
+!data/
 **/__pycache__/
 **/*.pyc
 **/*.pyo
