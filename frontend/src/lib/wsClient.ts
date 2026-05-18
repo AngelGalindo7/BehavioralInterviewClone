@@ -20,11 +20,23 @@ const MAX_BACKOFF_MS = 30_000;
 let _frameCount = 0;
 let _lastFrameTs = 0;
 
+export interface InterviewWebSocketOptions {
+  // Provider name routes the WS to the correct backend pipeline branch
+  // (audio_pcm vs text). Omit for the server-side default (Simli).
+  provider?: string;
+  // Required when provider is a text-mode provider (HeyGen) — the backend
+  // needs this id to route streaming.task/stop calls to the right upstream
+  // session. Ignored by audio_pcm providers.
+  avatarSessionId?: string;
+}
+
 export class InterviewWebSocket {
   private ws: WebSocket | null = null;
   private sessionId: string;
   private onAudio: AudioHandler;
   private onStatus: (status: string) => void;
+  private provider: string | undefined;
+  private avatarSessionId: string | undefined;
   private attempt = 0;
   private closed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -33,17 +45,23 @@ export class InterviewWebSocket {
   constructor(
     sessionId: string,
     onAudio: AudioHandler,
-    onStatus: (status: string) => void
+    onStatus: (status: string) => void,
+    options?: InterviewWebSocketOptions,
   ) {
     this.sessionId = sessionId;
     this.onAudio = onAudio;
     this.onStatus = onStatus;
+    this.provider = options?.provider;
+    this.avatarSessionId = options?.avatarSessionId;
   }
 
   connect(): void {
     if (this.closed) return;
     const protocol = location.protocol === "https:" ? "wss" : "ws";
-    const url = `${protocol}://${location.host}/ws/interview?session_id=${this.sessionId}`;
+    const params = new URLSearchParams({ session_id: this.sessionId });
+    if (this.provider) params.set("provider", this.provider);
+    if (this.avatarSessionId) params.set("avatar_session_id", this.avatarSessionId);
+    const url = `${protocol}://${location.host}/ws/interview?${params.toString()}`;
     this.ws = new WebSocket(url);
     this.ws.binaryType = "arraybuffer";
 
