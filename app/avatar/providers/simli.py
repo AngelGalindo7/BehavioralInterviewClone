@@ -1,6 +1,8 @@
+from typing import ClassVar
+
 import httpx
 
-from app.avatar.base import AvatarSessionProvider
+from app.avatar.base import AvatarMode, AvatarSessionProvider
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 
@@ -10,6 +12,8 @@ _ICE_URL = f"{_SIMLI_BASE}/compose/ice"
 
 
 class SimliSessionProvider(AvatarSessionProvider):
+    mode: ClassVar[AvatarMode] = "audio_pcm"
+
     def __init__(self, cb: CircuitBreaker) -> None:
         self._cb = cb
 
