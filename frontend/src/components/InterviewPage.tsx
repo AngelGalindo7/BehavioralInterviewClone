@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AvatarView, { type AvatarState } from "./AvatarView";
 import RecordButton from "./RecordButton";
 import StatusBar from "./StatusBar";
-import { avatarProvider } from "../lib/activeAvatar";
+import { getAvatarProvider } from "../lib/activeAvatar";
+import type { AvatarProvider } from "../lib/avatarProvider";
 import {
   isSpeechRecognitionSupported,
   startSpeechRecognition,
@@ -32,6 +33,7 @@ export default function InterviewPage() {
   const wsRef = useRef<InterviewWebSocket | null>(null);
   const recognitionRef = useRef<RecognitionHandle | null>(null);
   const avatarRef = useRef<{ video: HTMLVideoElement | null; audio: HTMLAudioElement | null }>(null);
+  const avatarProviderRef = useRef<AvatarProvider | null>(null);
 
   useEffect(() => {
     if (phase !== "running") return;
@@ -63,21 +65,25 @@ export default function InterviewPage() {
           throw new Error("Avatar video/audio elements not mounted");
         }
 
-        await avatarProvider.init({
+        const provider = getAvatarProvider("simli");
+        avatarProviderRef.current = provider;
+
+        await provider.init({
           sessionToken,
           iceServers,
           videoEl: refs.video,
           audioEl: refs.audio,
         });
         if (cancelled) {
-          await avatarProvider.destroy();
+          await provider.destroy();
+          avatarProviderRef.current = null;
           return;
         }
         setAvatarReady(true);
 
         const ws = new InterviewWebSocket(
           session_id,
-          (pcm, immediate) => avatarProvider.sendAudio(pcm, immediate),
+          (pcm, immediate) => provider.sendAudio(pcm, immediate),
           (status) => setWsStatus(status),
         );
         wsRef.current = ws;
@@ -90,7 +96,8 @@ export default function InterviewPage() {
     return () => {
       cancelled = true;
       wsRef.current?.close();
-      void avatarProvider.destroy();
+      void avatarProviderRef.current?.destroy();
+      avatarProviderRef.current = null;
     };
   }, [phase]);
 
@@ -126,7 +133,7 @@ export default function InterviewPage() {
   }, []);
 
   const handleSkip = useCallback(() => {
-    avatarProvider.interrupt();
+    avatarProviderRef.current?.interrupt();
     wsRef.current?.sendSkip();
   }, []);
 
@@ -146,7 +153,8 @@ export default function InterviewPage() {
     wsRef.current = null;
     ws?.close();
 
-    await avatarProvider.destroy();
+    await avatarProviderRef.current?.destroy();
+    avatarProviderRef.current = null;
 
     const idToEnd = sessionId;
     if (idToEnd) {
