@@ -37,17 +37,24 @@ import uuid
 from collections.abc import AsyncIterator
 
 import structlog
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from app.audio.chunker import iter_pcm_chunks
 from app.audio.tts import stream_tts_pcm
+from app.avatar.base import AvatarSessionProvider
 from app.avatar.protocol import AUDIO_IMMEDIATE_PREFIX, AUDIO_NORMAL_PREFIX
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.exceptions import CircuitOpenError
 from app.db.engine import AsyncSessionLocal
 from app.db.models import Turn
-from app.deps import get_elevenlabs_cb, get_history_queue, get_openai_cb
+from app.deps import (
+    get_avatar_provider,
+    get_avatar_provider_by_name,
+    get_elevenlabs_cb,
+    get_history_queue,
+    get_openai_cb,
+)
 from app.llm.responder import generate_response
 from app.rag.prompt_builder import build_system_prompt
 
@@ -248,6 +255,8 @@ async def _handle_transcript(
     openai_cb: CircuitBreaker,
     elevenlabs_cb: CircuitBreaker,
     history_queue: asyncio.Queue[str],
+    provider: AvatarSessionProvider,
+    avatar_session_id: str | None,
 ) -> tuple[str | None, int]:
     """
     Run the full pipeline for one interviewer question.
@@ -259,7 +268,13 @@ async def _handle_transcript(
     closing their underlying httpx responses. tts.py's finally block enqueues
     any captured history_item_id before re-raising, so even a cancelled stream
     cleans up its ElevenLabs history row.
+
+    Provider branch: when provider.mode == "text" (HeyGen), each sentence
+    flush calls provider.speak() instead of streaming ElevenLabs PCM through
+    the WS. The OpenAI streaming and sentence-flush logic is identical;
+    only the sink changes.
     """
+    is_text_mode = provider.mode == "text"
     t0 = time.monotonic()
     first_byte_logged = False
 
@@ -290,8 +305,10 @@ async def _handle_transcript(
             return
         # CB check moved here from the pre-LLM position. Lets OpenAI streaming
         # begin without waiting on the breaker lock, and means each flush is
-        # independently breaker-aware rather than only the first.
-        await elevenlabs_cb.check()
+        # independently breaker-aware rather than only the first. Skipped for
+        # text-mode providers since ElevenLabs is bypassed entirely.
+        if not is_text_mode:
+            await elevenlabs_cb.check()
         gap_ms = round((time.monotonic() - flush_end_time) * 1000, 1) if flush_end_time else None
         if gap_ms is not None and gap_ms > 50:
             log.warning(
@@ -310,25 +327,38 @@ async def _handle_transcript(
             chars=len(text_to_speak),
             text_preview=text_to_speak[:60],
             inter_flush_gap_ms=gap_ms,
+            mode=provider.mode,
         )
         flush_index += 1
         t_flush = time.monotonic()
-        frames_sent, total_pcm_bytes = await _send_audio_chunks(
-            websocket,
-            stream_tts_pcm(text_to_speak, history_queue),
-            first_chunk_state,
-        )
-        flush_end_time = time.monotonic()
-        log.info(
-            "tts_flush_done",
-            session_id=str(session_id),
-            sequence=sequence,
-            flush_index=flush_index - 1,
-            duration_ms=round((flush_end_time - t_flush) * 1000, 1),
-            frames_sent=frames_sent,
-            total_pcm_bytes=total_pcm_bytes,
-            is_total_pcm_aligned=total_pcm_bytes % 2 == 0,
-        )
+        if is_text_mode:
+            assert avatar_session_id is not None  # validated at WS handshake
+            await provider.speak(avatar_session_id, text_to_speak)
+            flush_end_time = time.monotonic()
+            log.info(
+                "avatar_text_flush_done",
+                session_id=str(session_id),
+                sequence=sequence,
+                flush_index=flush_index - 1,
+                duration_ms=round((flush_end_time - t_flush) * 1000, 1),
+            )
+        else:
+            frames_sent, total_pcm_bytes = await _send_audio_chunks(
+                websocket,
+                stream_tts_pcm(text_to_speak, history_queue),
+                first_chunk_state,
+            )
+            flush_end_time = time.monotonic()
+            log.info(
+                "tts_flush_done",
+                session_id=str(session_id),
+                sequence=sequence,
+                flush_index=flush_index - 1,
+                duration_ms=round((flush_end_time - t_flush) * 1000, 1),
+                frames_sent=frames_sent,
+                total_pcm_bytes=total_pcm_bytes,
+                is_total_pcm_aligned=total_pcm_bytes % 2 == 0,
+            )
         if not first_byte_logged:
             first_byte_logged = True
             log.info(
@@ -336,6 +366,7 @@ async def _handle_transcript(
                 session_id=str(session_id),
                 sequence=sequence,
                 ttfb_ms=round((time.monotonic() - t0) * 1000, 1),
+                mode=provider.mode,
             )
 
     try:
@@ -358,7 +389,8 @@ async def _handle_transcript(
                 await _flush(to_flush)
         if pending_text.strip():
             await _flush(pending_text)
-        await elevenlabs_cb.on_success()
+        if not is_text_mode:
+            await elevenlabs_cb.on_success()
     except asyncio.CancelledError:
         # Disconnect-driven cancellation: stream aclose runs as the async-for
         # iterators unwind, which terminates the upstream OpenAI/ElevenLabs
@@ -371,12 +403,14 @@ async def _handle_transcript(
         raise
     except CircuitOpenError:
         log.error("circuit_open_during_turn", session_id=str(session_id))
-        await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+        if not is_text_mode:
+            await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
         return previous_response_id, sequence
     except Exception as exc:
         log.error("turn_pipeline_error", session_id=str(session_id), error=str(exc))
-        await elevenlabs_cb.on_failure(exc)
-        await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+        if not is_text_mode:
+            await elevenlabs_cb.on_failure(exc)
+            await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
         return previous_response_id, sequence
 
     if not full_response.strip():
@@ -407,18 +441,49 @@ async def _handle_transcript(
 async def interview_ws(
     websocket: WebSocket,
     session_id: uuid.UUID,
+    provider_name: str | None = Query(default=None, alias="provider"),
+    avatar_session_id: str | None = Query(default=None),
     openai_cb: CircuitBreaker = Depends(get_openai_cb),
     elevenlabs_cb: CircuitBreaker = Depends(get_elevenlabs_cb),
     history_queue: asyncio.Queue[str] = Depends(get_history_queue),
+    default_provider: AvatarSessionProvider = Depends(get_avatar_provider),
 ) -> None:
     """
     Reader/processor split inside a TaskGroup so a client disconnect cancels
     any in-flight pipeline turn rather than waiting for the next send_bytes
     to fail. Without this, OpenAI/ElevenLabs streams keep consuming tokens
     after the user has hung up.
+
+    The avatar provider is resolved per-WS from the ?provider= query param,
+    falling back to the DI default. Text-mode providers (HeyGen) also require
+    ?avatar_session_id= so the backend can route speak()/close() to the
+    correct upstream session. We refuse the WS at handshake time when this
+    invariant doesn't hold, so handlers never see a half-configured provider.
     """
+    if provider_name is None:
+        provider = default_provider
+    else:
+        resolved = get_avatar_provider_by_name(provider_name)
+        if resolved is None:
+            await websocket.close(code=4400, reason=f"unknown provider: {provider_name!r}")
+            return
+        provider = resolved
+
+    if provider.mode == "text" and not avatar_session_id:
+        await websocket.close(
+            code=4400,
+            reason="avatar_session_id required for text-mode providers",
+        )
+        return
+
     await websocket.accept()
-    log.info("ws_connected", session_id=str(session_id))
+    log.info(
+        "ws_connected",
+        session_id=str(session_id),
+        provider=type(provider).__name__,
+        mode=provider.mode,
+        avatar_session_id=avatar_session_id,
+    )
 
     inbox: asyncio.Queue[str | None] = asyncio.Queue()
     max_bytes = settings.max_ws_text_frame_bytes
@@ -473,6 +538,8 @@ async def interview_ws(
                 openai_cb=openai_cb,
                 elevenlabs_cb=elevenlabs_cb,
                 history_queue=history_queue,
+                provider=provider,
+                avatar_session_id=avatar_session_id,
             )
 
     try:
@@ -484,3 +551,10 @@ async def interview_ws(
     except* Exception as eg:
         for exc in eg.exceptions:
             log.error("ws_unhandled_error", session_id=str(session_id), error=str(exc))
+    finally:
+        # Text-mode providers hold a server-side session that must be torn down
+        # explicitly; otherwise the upstream avatar session leaks until its
+        # idle timeout. close() is best-effort: it logs and swallows on failure
+        # so a flaky provider can't keep this handler hanging.
+        if provider.mode == "text" and avatar_session_id:
+            await provider.close(avatar_session_id)
