@@ -4,7 +4,7 @@
  * Outbound: JSON text frames (transcripts / skip).
  * Inbound:  binary frames whose first byte tells the avatar dispatcher whether
  *           the rest is a play-immediate chunk (0x01) or a normal chunk (0x00).
- *           See app/avatar/simli_client.py for the protocol definition.
+ *           See app/avatar/protocol.py for the protocol definition.
  *
  * Reconnects with exponential backoff + jitter; the reconnect timer is tracked
  * so close() can cancel a pending reconnect that would otherwise fire after

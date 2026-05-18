@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AvatarView, { type AvatarState } from "./AvatarView";
 import RecordButton from "./RecordButton";
 import StatusBar from "./StatusBar";
-import { destroyAvatar, initSimliAvatar, interruptAvatar, sendAudioToAvatar } from "../lib/simliAvatar";
+import { avatarProvider } from "../lib/activeAvatar";
 import {
   isSpeechRecognitionSupported,
   startSpeechRecognition,
@@ -51,8 +51,8 @@ export default function InterviewPage() {
         if (cancelled) return;
         setSessionId(session_id);
 
-        const tokenResp = await fetch("/simli/token", { method: "POST" });
-        if (!tokenResp.ok) throw new Error(`POST /simli/token failed (${tokenResp.status})`);
+        const tokenResp = await fetch("/avatar/session", { method: "POST" });
+        if (!tokenResp.ok) throw new Error(`POST /avatar/session failed (${tokenResp.status})`);
         const tokenData = await tokenResp.json();
         const sessionToken: string = tokenData.session_token;
         const iceServers: RTCIceServer[] = tokenData.ice_servers ?? [];
@@ -63,21 +63,21 @@ export default function InterviewPage() {
           throw new Error("Avatar video/audio elements not mounted");
         }
 
-        await initSimliAvatar({
+        await avatarProvider.init({
           sessionToken,
           iceServers,
           videoEl: refs.video,
           audioEl: refs.audio,
         });
         if (cancelled) {
-          await destroyAvatar();
+          await avatarProvider.destroy();
           return;
         }
         setAvatarReady(true);
 
         const ws = new InterviewWebSocket(
           session_id,
-          (pcm, immediate) => sendAudioToAvatar(pcm, immediate),
+          (pcm, immediate) => avatarProvider.sendAudio(pcm, immediate),
           (status) => setWsStatus(status),
         );
         wsRef.current = ws;
@@ -90,7 +90,7 @@ export default function InterviewPage() {
     return () => {
       cancelled = true;
       wsRef.current?.close();
-      void destroyAvatar();
+      void avatarProvider.destroy();
     };
   }, [phase]);
 
@@ -126,7 +126,7 @@ export default function InterviewPage() {
   }, []);
 
   const handleSkip = useCallback(() => {
-    interruptAvatar();
+    avatarProvider.interrupt();
     wsRef.current?.sendSkip();
   }, []);
 
@@ -146,7 +146,7 @@ export default function InterviewPage() {
     wsRef.current = null;
     ws?.close();
 
-    await destroyAvatar();
+    await avatarProvider.destroy();
 
     const idToEnd = sessionId;
     if (idToEnd) {
