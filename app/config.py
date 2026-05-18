@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     simli_max_session_length: int = 1800
     simli_max_idle_time: int = 60
 
+    # HeyGen — optional. Only required when avatar_provider="heygen" or the
+    # runtime ?provider=heygen toggle is exercised. Voice (incl. 3rd-party
+    # ElevenLabs) is bound to the avatar server-side in HeyGen's dashboard,
+    # so no voice_id env var is needed here.
+    heygen_api_key: str | None = None
+    heygen_avatar_id: str | None = None
+    heygen_quality: str = "low"
+
     # Circuit breakers
     cb_failure_threshold: int = 5
     cb_recovery_timeout: float = 30.0
