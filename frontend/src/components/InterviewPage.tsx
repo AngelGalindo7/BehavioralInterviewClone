@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AvatarView, { type AvatarState } from "./AvatarView";
 import RecordButton from "./RecordButton";
 import StatusBar from "./StatusBar";
-import { getAvatarProvider } from "../lib/activeAvatar";
+import { getAvatarProvider, type AvatarProviderName } from "../lib/activeAvatar";
 import type { AvatarProvider } from "../lib/avatarProvider";
 import {
   isSpeechRecognitionSupported,
@@ -29,6 +29,25 @@ export default function InterviewPage() {
   const [lastQuestion, setLastQuestion] = useState("");
   const [interimText, setInterimText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<AvatarProviderName>("simli");
+  const [availableProviders, setAvailableProviders] = useState<string[]>(["simli"]);
+
+  // Discover which providers the backend has actually built. HeyGen only
+  // registers when its env vars are set, so on deployments without HeyGen
+  // credentials we hide the toggle entirely rather than offering a button
+  // that always 400s.
+  useEffect(() => {
+    fetch("/avatar/providers")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.providers)) {
+          setAvailableProviders(data.providers);
+        }
+      })
+      .catch(() => {
+        /* keep the safe default of just ["simli"] */
+      });
+  }, []);
 
   const wsRef = useRef<InterviewWebSocket | null>(null);
   const recognitionRef = useRef<RecognitionHandle | null>(null);
@@ -53,19 +72,26 @@ export default function InterviewPage() {
         if (cancelled) return;
         setSessionId(session_id);
 
-        const tokenResp = await fetch("/avatar/session", { method: "POST" });
+        const tokenResp = await fetch(
+          `/avatar/session?provider=${encodeURIComponent(selectedProvider)}`,
+          { method: "POST" },
+        );
         if (!tokenResp.ok) throw new Error(`POST /avatar/session failed (${tokenResp.status})`);
         const tokenData = await tokenResp.json();
         const sessionToken: string = tokenData.session_token;
         const iceServers: RTCIceServer[] = tokenData.ice_servers ?? [];
-        if (!sessionToken) throw new Error("Simli token response missing session_token");
+        // HeyGen-only fields (undefined for Simli). url is the LiveKit URL;
+        // avatarSessionId routes streaming.task/stop on the backend.
+        const url: string | undefined = tokenData.url;
+        const avatarSessionId: string | undefined = tokenData.session_id;
+        if (!sessionToken) throw new Error("Avatar session response missing session_token");
 
         const refs = avatarRef.current;
         if (!refs?.video || !refs?.audio) {
           throw new Error("Avatar video/audio elements not mounted");
         }
 
-        const provider = getAvatarProvider("simli");
+        const provider = getAvatarProvider(selectedProvider);
         avatarProviderRef.current = provider;
 
         await provider.init({
@@ -73,6 +99,7 @@ export default function InterviewPage() {
           iceServers,
           videoEl: refs.video,
           audioEl: refs.audio,
+          url,
         });
         if (cancelled) {
           await provider.destroy();
@@ -85,6 +112,7 @@ export default function InterviewPage() {
           session_id,
           (pcm, immediate) => provider.sendAudio(pcm, immediate),
           (status) => setWsStatus(status),
+          { provider: selectedProvider, avatarSessionId },
         );
         wsRef.current = ws;
         ws.connect();
@@ -99,7 +127,10 @@ export default function InterviewPage() {
       void avatarProviderRef.current?.destroy();
       avatarProviderRef.current = null;
     };
-  }, [phase]);
+    // selectedProvider is read on entry to "running"; the toggle is hidden
+    // outside the preview phase so re-runs from a mid-session change can't
+    // actually happen — listing it in deps is correctness, not behavior.
+  }, [phase, selectedProvider]);
 
   const handleStartListening = useCallback(() => {
     if (!avatarReady) return;
@@ -252,6 +283,23 @@ export default function InterviewPage() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           {!confirmingStart ? (
             <>
+              {availableProviders.length > 1 && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                  {availableProviders.map((name) => {
+                    const active = selectedProvider === name;
+                    return (
+                      <button
+                        key={name}
+                        onClick={() => setSelectedProvider(name as AvatarProviderName)}
+                        className={active ? "btn btn-primary" : "btn btn-ghost"}
+                        style={{ padding: "5px 12px", fontSize: 12 }}
+                      >
+                        {name === "simli" ? "Simli (fast)" : name === "heygen" ? "HeyGen (photoreal)" : name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <button
                 onClick={() => setConfirmingStart(true)}
                 className="btn btn-primary"
@@ -260,8 +308,9 @@ export default function InterviewPage() {
                 Start
               </button>
               <p style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", maxWidth: 360 }}>
-                Reserves a Simli avatar slot and opens the OpenAI + ElevenLabs pipeline. Real API
-                credits will be used.
+                {selectedProvider === "heygen"
+                  ? "Reserves a HeyGen avatar slot. HeyGen runs TTS server-side using your configured voice; expect higher TTFB than Simli."
+                  : "Reserves a Simli avatar slot and opens the OpenAI + ElevenLabs pipeline. Real API credits will be used."}
               </p>
               <button onClick={handleBackToLanding} className="btn btn-ghost" style={{ padding: "5px 10px", fontSize: 12 }}>
                 Back
