@@ -1,12 +1,13 @@
-"""Unit tests for POST /simli/token (v3 simli-client compatible)."""
+"""Unit tests for POST /avatar/session."""
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
 
+from app.avatar.providers.simli import SimliSessionProvider
 from app.core.circuit_breaker import CircuitBreaker, CircuitState
-from app.deps import get_simli_cb
+from app.deps import get_avatar_provider
 from app.main import create_app
 
 
@@ -39,7 +40,7 @@ def _make_httpx_mock(token_json: dict, ice_json: list, token_status: int = 200, 
 
 
 def _open_circuit_breaker() -> CircuitBreaker:
-    cb = CircuitBreaker("simli", failure_threshold=1, recovery_timeout=3600.0)
+    cb = CircuitBreaker("avatar", failure_threshold=1, recovery_timeout=3600.0)
     cb._state = CircuitState.OPEN
     cb._opened_at = time.monotonic()
     return cb
@@ -47,35 +48,35 @@ def _open_circuit_breaker() -> CircuitBreaker:
 
 # ── Happy path ────────────────────────────────────────────────────────────────
 
-def test_simli_token_returns_200(lifespan_mocks, auth_cookies):
+def test_avatar_session_returns_200(lifespan_mocks, auth_cookies):
     http_ctx, _ = _make_httpx_mock({"session_token": "tok-xyz"}, [{"urls": ["stun:stun.l.google.com:19302"]}])
-    with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
+    with patch("app.avatar.providers.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
         with TestClient(app, cookies=auth_cookies) as client:
-            resp = client.post("/simli/token")
+            resp = client.post("/avatar/session")
 
     assert resp.status_code == 200
 
 
-def test_simli_token_returns_session_token_and_ice_servers(lifespan_mocks, auth_cookies):
+def test_avatar_session_returns_session_token_and_ice_servers(lifespan_mocks, auth_cookies):
     ice = [{"urls": ["turn:example.com:3478"], "username": "u", "credential": "p"}]
     http_ctx, _ = _make_httpx_mock({"session_token": "tok-abc"}, ice)
-    with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
+    with patch("app.avatar.providers.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
         with TestClient(app, cookies=auth_cookies) as client:
-            resp = client.post("/simli/token")
+            resp = client.post("/avatar/session")
 
     body = resp.json()
     assert body["session_token"] == "tok-abc"
     assert body["ice_servers"] == ice
 
 
-def test_simli_token_posts_v3_required_fields(lifespan_mocks, auth_cookies):
+def test_avatar_session_posts_v3_required_fields(lifespan_mocks, auth_cookies):
     http_ctx, mock_client = _make_httpx_mock({"session_token": "t"}, [])
-    with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
+    with patch("app.avatar.providers.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
         with TestClient(app, cookies=auth_cookies) as client:
-            client.post("/simli/token")
+            client.post("/avatar/session")
 
     sent_json = mock_client.post.call_args.kwargs["json"]
     sent_headers = mock_client.post.call_args.kwargs["headers"]
@@ -87,35 +88,36 @@ def test_simli_token_posts_v3_required_fields(lifespan_mocks, auth_cookies):
     assert sent_headers.get("x-simli-api-key")
 
 
-def test_simli_token_502_when_response_missing_session_token(lifespan_mocks, auth_cookies):
+def test_avatar_session_502_when_response_missing_session_token(lifespan_mocks, auth_cookies):
     http_ctx, _ = _make_httpx_mock({}, [])
-    with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
+    with patch("app.avatar.providers.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
         with TestClient(app, cookies=auth_cookies, raise_server_exceptions=False) as client:
-            resp = client.post("/simli/token")
+            resp = client.post("/avatar/session")
 
     assert resp.status_code == 502
 
 
 # ── Circuit breaker open ──────────────────────────────────────────────────────
 
-def test_simli_token_returns_503_when_circuit_open(lifespan_mocks, auth_cookies):
+def test_avatar_session_returns_503_when_circuit_open(lifespan_mocks, auth_cookies):
     open_cb = _open_circuit_breaker()
+    provider = SimliSessionProvider(open_cb)
     app = create_app()
-    app.dependency_overrides[get_simli_cb] = lambda: open_cb
+    app.dependency_overrides[get_avatar_provider] = lambda: provider
     with TestClient(app, cookies=auth_cookies) as client:
-        resp = client.post("/simli/token")
+        resp = client.post("/avatar/session")
 
     assert resp.status_code == 503
 
 
 # ── Upstream error ────────────────────────────────────────────────────────────
 
-def test_simli_token_returns_502_on_upstream_4xx(lifespan_mocks, auth_cookies):
+def test_avatar_session_returns_502_on_upstream_4xx(lifespan_mocks, auth_cookies):
     http_ctx, _ = _make_httpx_mock({}, [], token_status=401)
-    with patch("app.api.simli.httpx.AsyncClient", return_value=http_ctx):
+    with patch("app.avatar.providers.simli.httpx.AsyncClient", return_value=http_ctx):
         app = create_app()
         with TestClient(app, cookies=auth_cookies, raise_server_exceptions=False) as client:
-            resp = client.post("/simli/token")
+            resp = client.post("/avatar/session")
 
     assert resp.status_code == 502

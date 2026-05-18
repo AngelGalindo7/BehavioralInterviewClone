@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
     from app.api.auth import router as auth_router
     from app.api.health import router as health_router
     from app.api.session import router as session_router
-    from app.api.simli import router as simli_router
+    from app.api.avatar import router as avatar_router
     from app.api.ws_interview import router as ws_router
 
     app = FastAPI(
@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router, prefix="/auth")
     app.include_router(session_router, prefix="/session")
-    app.include_router(simli_router, prefix="/simli")
+    app.include_router(avatar_router, prefix="/avatar")
     app.include_router(admin_router, prefix="/admin")
     app.include_router(ws_router)
 

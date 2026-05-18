@@ -41,7 +41,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.audio.chunker import iter_pcm_chunks
 from app.audio.tts import stream_tts_pcm
-from app.avatar.simli_client import AUDIO_IMMEDIATE_PREFIX, AUDIO_NORMAL_PREFIX
+from app.avatar.protocol import AUDIO_IMMEDIATE_PREFIX, AUDIO_NORMAL_PREFIX
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.exceptions import CircuitOpenError

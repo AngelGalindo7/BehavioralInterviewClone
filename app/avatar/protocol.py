@@ -1,5 +1,5 @@
 """
-Audio frame prefix protocol for backend → browser → simli-client.
+Audio frame prefix protocol for backend → browser → avatar SDK.
 
 The simli-client v3.x SDK exposes two methods for ingesting raw PCM:
   - sendAudioDataImmediate(): bypass the SDK's internal jitter buffer and play

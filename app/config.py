@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     pcm_chunk_bytes: int = 6000
     log_level: str = "INFO"
     environment: str = "production"
+    avatar_provider: str = "simli"
 
     # Security
     frontend_origin: str = "http://localhost:5173"

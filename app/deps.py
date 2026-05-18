@@ -20,11 +20,20 @@ elevenlabs_cb = CircuitBreaker(
     recovery_timeout=settings.cb_recovery_timeout,
 )
 
-simli_cb = CircuitBreaker(
-    name="simli",
-    failure_threshold=settings.cb_failure_threshold,
-    recovery_timeout=settings.cb_recovery_timeout,
-)
+# ── Avatar session provider (singleton per-process) ───────────────────────────
+def _build_avatar_provider():
+    from app.avatar.base import AvatarSessionProvider
+    from app.avatar.providers.simli import SimliSessionProvider
+    cb = CircuitBreaker(
+        name="avatar",
+        failure_threshold=settings.cb_failure_threshold,
+        recovery_timeout=settings.cb_recovery_timeout,
+    )
+    if settings.avatar_provider == "simli":
+        return SimliSessionProvider(cb)
+    raise ValueError(f"Unknown avatar_provider: {settings.avatar_provider!r}")
+
+_avatar_provider = _build_avatar_provider()
 
 # ── ElevenLabs history-deletion queue (singleton per-process) ─────────────────
 history_delete_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -45,8 +54,8 @@ def get_elevenlabs_cb() -> CircuitBreaker:
     return elevenlabs_cb
 
 
-def get_simli_cb() -> CircuitBreaker:
-    return simli_cb
+def get_avatar_provider():
+    return _avatar_provider
 
 
 def get_history_queue() -> asyncio.Queue[str]:
