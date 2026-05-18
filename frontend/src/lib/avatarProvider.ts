@@ -3,6 +3,9 @@ export interface AvatarInitParams {
   iceServers: RTCIceServer[];
   videoEl: HTMLVideoElement;
   audioEl: HTMLAudioElement;
+  // LiveKit URL — set only for providers that join a LiveKit room (HeyGen).
+  // Simli ignores this and negotiates its own WebRTC via simli-client.
+  url?: string;
 }
 
 export interface AvatarProvider {
