@@ -31,6 +31,15 @@ SIMLI_API_KEY=...
 SIMLI_FACE_ID=...
 SIMLI_IS_TRINITY=true
 
+# HeyGen — optional second avatar provider. Leave commented out to keep the
+# UI single-provider (Simli only). When set, the frontend toggle exposes
+# both Simli and HeyGen on the preview screen. Voice (incl. 3rd-party
+# ElevenLabs) is bound to the interactive avatar in HeyGen's dashboard,
+# so there is no HEYGEN_VOICE_ID env var.
+#HEYGEN_API_KEY=...
+#HEYGEN_AVATAR_ID=...
+#HEYGEN_QUALITY=low
+
 # App
 CANDIDATE_NAME=Angel
 LOG_LEVEL=INFO
