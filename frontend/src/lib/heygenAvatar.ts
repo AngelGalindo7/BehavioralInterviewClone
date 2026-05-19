@@ -26,10 +26,6 @@ export function createHeyGenProvider(): AvatarProvider {
       room = new Room({
         adaptiveStream: true,
         dynacast: true,
-        rtcConfig:
-          params.iceServers && params.iceServers.length > 0
-            ? { iceServers: params.iceServers as RTCIceServer[] }
-            : undefined,
       });
 
       room.on(RoomEvent.TrackSubscribed, (track) => {
@@ -43,7 +39,11 @@ export function createHeyGenProvider(): AvatarProvider {
       });
 
       console.log("[HEYGEN] init: connecting to LiveKit room");
-      await room.connect(params.url, params.sessionToken);
+      const connectOpts =
+        params.iceServers && params.iceServers.length > 0
+          ? { rtcConfig: { iceServers: params.iceServers as RTCIceServer[] } }
+          : undefined;
+      await room.connect(params.url, params.sessionToken, connectOpts);
       console.log("[HEYGEN] init: LiveKit connected, awaiting publisher tracks");
     },
 
