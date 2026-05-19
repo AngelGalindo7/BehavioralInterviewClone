@@ -1,11 +1,15 @@
 import asyncio
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 from app.db.engine import AsyncSessionLocal
+
+if TYPE_CHECKING:
+    from app.avatar.base import AvatarSessionProvider
 
 # ── Circuit breakers (singleton per-process) ──────────────────────────────────
 openai_cb = CircuitBreaker(
@@ -23,7 +27,7 @@ elevenlabs_cb = CircuitBreaker(
 # ── Avatar session providers (singletons per-process) ─────────────────────────
 # Per-provider circuit breakers: a Simli outage must not open HeyGen's breaker
 # and vice versa. Provider names also appear in CB log lines for observability.
-def _build_avatar_providers() -> dict[str, "AvatarSessionProvider"]:  # noqa: F821
+def _build_avatar_providers() -> dict[str, "AvatarSessionProvider"]:
     from app.avatar.base import AvatarSessionProvider
     from app.avatar.providers.simli import SimliSessionProvider
 
