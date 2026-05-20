@@ -43,9 +43,14 @@ def _get_client() -> AsyncElevenLabs:
 async def stream_tts_pcm(
     text: str,
     history_delete_queue: asyncio.Queue[str],
+    output_format: str | None = None,
 ) -> AsyncIterator[bytes]:
     """
     Stream PCM16 audio bytes from ElevenLabs for *text*.
+
+    *output_format* overrides settings.elevenlabs_output_format per-call so
+    providers with different sample-rate requirements (Simli: 16 kHz, LiveAvatar
+    LITE: 24 kHz) can share this function without forcing a global config.
 
     Captures history_item_id from the first chunk that exposes alignment data.
     Enqueues for deletion in a finally block so a cancelled stream still cleans
@@ -59,15 +64,16 @@ async def stream_tts_pcm(
     completed_normally = False
     chunk_index = 0
     cumulative_bytes = 0
+    fmt = output_format or settings.elevenlabs_output_format
 
-    log.debug("tts_stream_start", text_len=len(text), text_preview=text[:60])
+    log.debug("tts_stream_start", text_len=len(text), text_preview=text[:60], output_format=fmt)
 
     try:
         async for chunk in client.text_to_speech.convert_as_stream(
             voice_id=settings.elevenlabs_voice_id,
             text=text,
             model_id=settings.elevenlabs_model_id,
-            output_format=settings.elevenlabs_output_format,
+            output_format=fmt,
         ):
             audio_bytes: bytes | None = None
             if isinstance(chunk, bytes):
