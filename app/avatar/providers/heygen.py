@@ -33,11 +33,11 @@ import base64
 import json
 import uuid
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import httpx
 import structlog
-import websockets
-from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import ClientConnection, connect as ws_connect
 
 from app.avatar.base import AvatarMode, AvatarSessionProvider
 from app.config import settings
@@ -64,7 +64,7 @@ class _SessionState:
 
 class HeyGenSessionProvider(AvatarSessionProvider):
     """LiveAvatar LITE — class name retained for backwards compat (see module docstring)."""
-    mode: AvatarMode = "audio_pcm_server"
+    mode: ClassVar[AvatarMode] = "audio_pcm_server"
 
     def __init__(self, cb: CircuitBreaker) -> None:
         self._cb = cb
@@ -159,7 +159,7 @@ class HeyGenSessionProvider(AvatarSessionProvider):
                 return state.ws
             sep = "&" if "?" in state.ws_url else "?"
             url = f"{state.ws_url}{sep}token={state.session_token}"
-            state.ws = await websockets.connect(url, max_size=2 * 1024 * 1024)
+            state.ws = await ws_connect(url, max_size=2 * 1024 * 1024)
             log.info("liveavatar_ws_connected", ws_url_host=state.ws_url.split("?")[0])
             return state.ws
 
