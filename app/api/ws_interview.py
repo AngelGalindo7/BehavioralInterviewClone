@@ -43,6 +43,7 @@ from app.audio.chunker import iter_pcm_chunks
 from app.audio.tts import stream_tts_pcm
 from app.avatar.base import AvatarSessionProvider
 from app.avatar.protocol import AUDIO_IMMEDIATE_PREFIX, AUDIO_NORMAL_PREFIX
+from app.avatar.providers.heygen import LIVEAVATAR_TTS_OUTPUT_FORMAT
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.exceptions import CircuitOpenError
@@ -269,12 +270,17 @@ async def _handle_transcript(
     any captured history_item_id before re-raising, so even a cancelled stream
     cleans up its ElevenLabs history row.
 
-    Provider branch: when provider.mode == "text" (HeyGen), each sentence
-    flush calls provider.speak() instead of streaming ElevenLabs PCM through
-    the WS. The OpenAI streaming and sentence-flush logic is identical;
-    only the sink changes.
+    Provider branch:
+      - text (legacy): provider.speak() per flush, no ElevenLabs.
+      - audio_pcm (Simli): stream ElevenLabs PCM @ 16 kHz through the browser WS.
+      - audio_pcm_server (LiveAvatar LITE): stream ElevenLabs PCM @ 24 kHz to
+        provider.send_pcm() (which forwards over the provider's server-side
+        WebSocket as base64). Frontend WS sees no audio for this provider.
     """
     is_text_mode = provider.mode == "text"
+    is_pcm_server_mode = provider.mode == "audio_pcm_server"
+    uses_elevenlabs = not is_text_mode
+    tts_output_format = LIVEAVATAR_TTS_OUTPUT_FORMAT if is_pcm_server_mode else None
     t0 = time.monotonic()
     first_byte_logged = False
 
@@ -307,7 +313,7 @@ async def _handle_transcript(
         # begin without waiting on the breaker lock, and means each flush is
         # independently breaker-aware rather than only the first. Skipped for
         # text-mode providers since ElevenLabs is bypassed entirely.
-        if not is_text_mode:
+        if uses_elevenlabs:
             await elevenlabs_cb.check()
         gap_ms = round((time.monotonic() - flush_end_time) * 1000, 1) if flush_end_time else None
         if gap_ms is not None and gap_ms > 50:
@@ -342,10 +348,38 @@ async def _handle_transcript(
                 flush_index=flush_index - 1,
                 duration_ms=round((flush_end_time - t_flush) * 1000, 1),
             )
+        elif is_pcm_server_mode:
+            assert avatar_session_id is not None  # validated at WS handshake
+            total_pcm_bytes = 0
+            chunks_sent = 0
+            is_first_chunk = first_chunk_state["is_first"]
+            async for tts_bytes in stream_tts_pcm(
+                text_to_speak, history_queue, output_format=tts_output_format
+            ):
+                if not tts_bytes:
+                    continue
+                await provider.send_pcm(
+                    avatar_session_id, tts_bytes, is_first=is_first_chunk
+                )
+                is_first_chunk = False
+                first_chunk_state["is_first"] = False
+                chunks_sent += 1
+                total_pcm_bytes += len(tts_bytes)
+            await provider.send_pcm_end(avatar_session_id)
+            flush_end_time = time.monotonic()
+            log.info(
+                "avatar_pcm_server_flush_done",
+                session_id=str(session_id),
+                sequence=sequence,
+                flush_index=flush_index - 1,
+                duration_ms=round((flush_end_time - t_flush) * 1000, 1),
+                chunks_sent=chunks_sent,
+                total_pcm_bytes=total_pcm_bytes,
+            )
         else:
             frames_sent, total_pcm_bytes = await _send_audio_chunks(
                 websocket,
-                stream_tts_pcm(text_to_speak, history_queue),
+                stream_tts_pcm(text_to_speak, history_queue, output_format=tts_output_format),
                 first_chunk_state,
             )
             flush_end_time = time.monotonic()
@@ -389,7 +423,7 @@ async def _handle_transcript(
                 await _flush(to_flush)
         if pending_text.strip():
             await _flush(pending_text)
-        if not is_text_mode:
+        if uses_elevenlabs:
             await elevenlabs_cb.on_success()
     except asyncio.CancelledError:
         # Disconnect-driven cancellation: stream aclose runs as the async-for
@@ -403,13 +437,16 @@ async def _handle_transcript(
         raise
     except CircuitOpenError:
         log.error("circuit_open_during_turn", session_id=str(session_id))
-        if not is_text_mode:
+        # Fallback PCM only goes to providers whose audio sink IS the browser
+        # WS (Simli). Text and pcm_server providers handle their own silence.
+        if provider.mode == "audio_pcm":
             await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
         return previous_response_id, sequence
     except Exception as exc:
         log.error("turn_pipeline_error", session_id=str(session_id), error=str(exc))
-        if not is_text_mode:
+        if uses_elevenlabs:
             await elevenlabs_cb.on_failure(exc)
+        if provider.mode == "audio_pcm":
             await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
         return previous_response_id, sequence
 
@@ -469,10 +506,10 @@ async def interview_ws(
             return
         provider = resolved
 
-    if provider.mode == "text" and not avatar_session_id:
+    if provider.mode in ("text", "audio_pcm_server") and not avatar_session_id:
         await websocket.close(
             code=4400,
-            reason="avatar_session_id required for text-mode providers",
+            reason=f"avatar_session_id required for {provider.mode} providers",
         )
         return
 
@@ -552,9 +589,10 @@ async def interview_ws(
         for exc in eg.exceptions:
             log.error("ws_unhandled_error", session_id=str(session_id), error=str(exc))
     finally:
-        # Text-mode providers hold a server-side session that must be torn down
-        # explicitly; otherwise the upstream avatar session leaks until its
-        # idle timeout. close() is best-effort: it logs and swallows on failure
-        # so a flaky provider can't keep this handler hanging.
-        if provider.mode == "text" and avatar_session_id:
+        # Both text-mode (legacy HeyGen) and audio_pcm_server (LiveAvatar)
+        # providers hold a server-side session that must be torn down explicitly;
+        # otherwise the upstream avatar session leaks until its idle timeout.
+        # close() is best-effort: it logs and swallows on failure so a flaky
+        # provider can't keep this handler hanging.
+        if provider.mode in ("text", "audio_pcm_server") and avatar_session_id:
             await provider.close(avatar_session_id)
