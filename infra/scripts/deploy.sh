@@ -61,6 +61,10 @@ for i in $(seq 1 12); do
   fi
 done
 
+echo "==> Syncing Nginx config from repo"
+sudo cp "$APP_DIR/infra/nginx/behavioral-dummy.conf" \
+    /etc/nginx/sites-available/behavioral-dummy
+
 echo "==> Reloading Nginx"
 sudo nginx -t && sudo systemctl reload nginx
 
