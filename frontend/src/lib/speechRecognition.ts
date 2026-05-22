@@ -16,6 +16,8 @@
  * NOTE: SpeechRecognition is not available in Firefox or Safari.
  */
 
+import { mark as markTiming } from "./timing";
+
 type ResultCallback = (text: string) => void;
 type InterimCallback = (text: string) => void;
 type ErrorCallback = (error: string) => void;
@@ -120,6 +122,10 @@ export function startSpeechRecognition(
     if (committed) return;
     committed = true;
     clearSilenceTimer();
+    // Marks the moment we decided the user's utterance was "done" — either
+    // Chrome's native isFinal or our silence-fallback timer firing. Both
+    // paths trigger onFinal, which kicks off the turn on the backend.
+    markTiming("webspeech_final");
     onFinal(text);
     try {
       recognition.abort();
@@ -158,6 +164,7 @@ export function startSpeechRecognition(
   };
 
   recognition.start();
+  markTiming("audio_capture_start");
 
   return {
     recognition,
