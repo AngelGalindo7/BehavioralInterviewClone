@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: str
     elevenlabs_model_id: str = "eleven_turbo_v2_5"
     elevenlabs_output_format: str = "pcm_16000"
+    # Voice settings — taste knobs, tune by ear in a real session.
+    # stability < 0.5 widens prosody range (less monotone) at the cost of more
+    # take-to-take variability. style amplifies the voice's natural delivery;
+    # leave low if cloned from a flat reference.
+    elevenlabs_stability: float = 0.35
+    elevenlabs_similarity_boost: float = 0.75
+    elevenlabs_style: float = 0.30
+    elevenlabs_use_speaker_boost: bool = True
 
     # Simli — v3 SDK uses /compose/token with these fields
     simli_api_key: str

@@ -22,6 +22,7 @@ import contextlib
 from collections.abc import AsyncIterator
 
 import structlog
+from elevenlabs import VoiceSettings
 from elevenlabs.client import AsyncElevenLabs
 
 from app.config import settings
@@ -74,6 +75,12 @@ async def stream_tts_pcm(
             text=text,
             model_id=settings.elevenlabs_model_id,
             output_format=fmt,
+            voice_settings=VoiceSettings(
+                stability=settings.elevenlabs_stability,
+                similarity_boost=settings.elevenlabs_similarity_boost,
+                style=settings.elevenlabs_style,
+                use_speaker_boost=settings.elevenlabs_use_speaker_boost,
+            ),
         ):
             audio_bytes: bytes | None = None
             if isinstance(chunk, bytes):
