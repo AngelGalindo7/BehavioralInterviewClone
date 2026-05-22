@@ -39,6 +39,7 @@ from collections.abc import AsyncIterator
 import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
+from app.api.session import close_session_if_active
 from app.audio.chunker import iter_pcm_chunks
 from app.audio.tts import stream_tts_pcm
 from app.avatar.base import AvatarSessionProvider
@@ -56,6 +57,11 @@ from app.deps import (
     get_history_queue,
     get_openai_cb,
 )
+
+# Custom WS close codes for client-visible end-of-session reasons.
+# 4000-4999 are reserved for application use per RFC 6455.
+WS_CLOSE_MAX_TURNS = 4002
+WS_CLOSE_MAX_DURATION = 4003
 from app.llm.responder import generate_response
 from app.rag.prompt_builder import build_system_prompt
 
@@ -258,6 +264,7 @@ async def _handle_transcript(
     history_queue: asyncio.Queue[str],
     provider: AvatarSessionProvider,
     avatar_session_id: str | None,
+    turn_id: str | None = None,
 ) -> tuple[str | None, int]:
     """
     Run the full pipeline for one interviewer question.
@@ -284,6 +291,41 @@ async def _handle_transcript(
     t0 = time.monotonic()
     first_byte_logged = False
 
+    # Per-stage waterfall timestamps for the blog-post latency budget.
+    # Captured in the hot path and emitted as a single turn_stage_timing log
+    # at the end of the turn (including the error paths). Simli does not expose
+    # a server-visible first-frame ack — frontend rVFC fills that gap and ships
+    # a client_timing message keyed by turn_id.
+    llm_first_token_t: float | None = None
+    llm_total_t: float | None = None
+    first_flush_start_t: float | None = None
+    last_flush_end_t: float | None = None
+    tts_first_chunk_t: float | None = None
+
+    def _log_stage_timing(outcome: str) -> None:
+        stages: dict[str, float] = {}
+        if llm_first_token_t is not None:
+            stages["llm_ttft_ms"] = round((llm_first_token_t - t0) * 1000, 1)
+        if llm_total_t is not None:
+            stages["llm_total_ms"] = round((llm_total_t - t0) * 1000, 1)
+        if tts_first_chunk_t is not None and first_flush_start_t is not None:
+            stages["tts_first_chunk_ms"] = round(
+                (tts_first_chunk_t - first_flush_start_t) * 1000, 1
+            )
+        if first_flush_start_t is not None and last_flush_end_t is not None:
+            stages["tts_total_ms"] = round(
+                (last_flush_end_t - first_flush_start_t) * 1000, 1
+            )
+        log.info(
+            "turn_stage_timing",
+            session_id=str(session_id),
+            sequence=sequence,
+            turn_id=turn_id,
+            outcome=outcome,
+            mode=provider.mode,
+            **stages,
+        )
+
     # RAG path — retained for re-adoption; see DECISION_LOG.md 05/05/2026
     # try:
     #     embedding = await openai_cb.call(lambda: embed_text(question))
@@ -305,8 +347,26 @@ async def _handle_transcript(
     flush_index = 0
     flush_end_time: float | None = None
 
+    async def _timed_tts_stream(
+        text_to_speak: str,
+    ) -> AsyncIterator[bytes]:
+        """
+        Wrap stream_tts_pcm and stamp tts_first_chunk_t on the first PCM byte
+        the upstream ElevenLabs stream yields for this turn. Subsequent flushes
+        leave the timestamp untouched so it always reflects the very first
+        chunk the user could possibly have heard.
+        """
+        nonlocal tts_first_chunk_t
+        async for chunk in stream_tts_pcm(
+            text_to_speak, history_queue, output_format=tts_output_format
+        ):
+            if tts_first_chunk_t is None:
+                tts_first_chunk_t = time.monotonic()
+            yield chunk
+
     async def _flush(text_to_speak: str) -> None:
         nonlocal first_byte_logged, flush_index, flush_end_time
+        nonlocal first_flush_start_t, last_flush_end_t
         if not text_to_speak.strip():
             return
         # CB check moved here from the pre-LLM position. Lets OpenAI streaming
@@ -337,10 +397,13 @@ async def _handle_transcript(
         )
         flush_index += 1
         t_flush = time.monotonic()
+        if first_flush_start_t is None:
+            first_flush_start_t = t_flush
         if is_text_mode:
             assert avatar_session_id is not None  # validated at WS handshake
             await provider.speak(avatar_session_id, text_to_speak)
             flush_end_time = time.monotonic()
+            last_flush_end_t = flush_end_time
             log.info(
                 "avatar_text_flush_done",
                 session_id=str(session_id),
@@ -353,9 +416,7 @@ async def _handle_transcript(
             total_pcm_bytes = 0
             chunks_sent = 0
             is_first_chunk = first_chunk_state["is_first"]
-            async for tts_bytes in stream_tts_pcm(
-                text_to_speak, history_queue, output_format=tts_output_format
-            ):
+            async for tts_bytes in _timed_tts_stream(text_to_speak):
                 if not tts_bytes:
                     continue
                 await provider.send_pcm(
@@ -367,6 +428,7 @@ async def _handle_transcript(
                 total_pcm_bytes += len(tts_bytes)
             await provider.send_pcm_end(avatar_session_id)
             flush_end_time = time.monotonic()
+            last_flush_end_t = flush_end_time
             log.info(
                 "avatar_pcm_server_flush_done",
                 session_id=str(session_id),
@@ -379,10 +441,11 @@ async def _handle_transcript(
         else:
             frames_sent, total_pcm_bytes = await _send_audio_chunks(
                 websocket,
-                stream_tts_pcm(text_to_speak, history_queue, output_format=tts_output_format),
+                _timed_tts_stream(text_to_speak),
                 first_chunk_state,
             )
             flush_end_time = time.monotonic()
+            last_flush_end_t = flush_end_time
             log.info(
                 "tts_flush_done",
                 session_id=str(session_id),
@@ -407,6 +470,8 @@ async def _handle_transcript(
         async for delta, resp_id in generate_response(
             question, system_prompt, previous_response_id, openai_cb
         ):
+            if llm_first_token_t is None:
+                llm_first_token_t = time.monotonic()
             full_response += delta
             pending_text += delta
             if resp_id:
@@ -421,6 +486,7 @@ async def _handle_transcript(
                 )
             if to_flush:
                 await _flush(to_flush)
+        llm_total_t = time.monotonic()
         if pending_text.strip():
             await _flush(pending_text)
         if uses_elevenlabs:
@@ -434,6 +500,7 @@ async def _handle_transcript(
             session_id=str(session_id),
             sequence=sequence,
         )
+        _log_stage_timing("cancelled")
         raise
     except CircuitOpenError:
         log.error("circuit_open_during_turn", session_id=str(session_id))
@@ -441,6 +508,7 @@ async def _handle_transcript(
         # WS (Simli). Text and pcm_server providers handle their own silence.
         if provider.mode == "audio_pcm":
             await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+        _log_stage_timing("circuit_open")
         return previous_response_id, sequence
     except Exception as exc:
         log.error("turn_pipeline_error", session_id=str(session_id), error=str(exc))
@@ -448,9 +516,11 @@ async def _handle_transcript(
             await elevenlabs_cb.on_failure(exc)
         if provider.mode == "audio_pcm":
             await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+        _log_stage_timing("error")
         return previous_response_id, sequence
 
     if not full_response.strip():
+        _log_stage_timing("empty_response")
         return last_response_id or None, sequence
 
     ttfb_ms = (time.monotonic() - t0) * 1000
@@ -461,6 +531,7 @@ async def _handle_transcript(
         ttfb_ms=round(ttfb_ms, 1),
         question_preview=question[:60],
     )
+    _log_stage_timing("ok")
 
     persisted = await _persist_turn(
         session_id=session_id,
@@ -544,6 +615,8 @@ async def interview_ws(
     async def _processor() -> None:
         previous_response_id: str | None = None
         sequence = 0
+        turns_accepted = 0
+        max_turns = settings.max_turns_per_session
         while True:
             raw = await inbox.get()
             if raw is None:
@@ -558,6 +631,23 @@ async def interview_ws(
             if msg_type == "skip":
                 log.debug("ws_skip_received", session_id=str(session_id))
                 continue
+            if msg_type == "client_timing":
+                # Frontend per-event waterfall events keyed by the turn_id the
+                # client sent on the transcript. Forwarded straight to Loki so
+                # the Grafana panel can correlate browser-side and backend
+                # stages by turn_id without a custom join layer.
+                raw_events = msg.get("events") or {}
+                stage_fields = {
+                    k: v for k, v in raw_events.items()
+                    if isinstance(v, (int, float))
+                }
+                log.info(
+                    "client_stage_timing",
+                    session_id=str(session_id),
+                    turn_id=msg.get("turn_id"),
+                    **stage_fields,
+                )
+                continue
             if msg_type != "transcript":
                 log.debug("ws_unknown_message_type", msg_type=msg_type)
                 continue
@@ -565,6 +655,23 @@ async def interview_ws(
             question = (msg.get("text") or "").strip()
             if not question:
                 continue
+            client_turn_id = msg.get("turn_id") if isinstance(msg.get("turn_id"), str) else None
+
+            # Per-session turn cap. Counted on accepted transcripts only —
+            # skips and malformed frames don't bill upstream APIs.
+            if turns_accepted >= max_turns:
+                log.warning(
+                    "ws_max_turns_reached",
+                    session_id=str(session_id),
+                    turns_accepted=turns_accepted,
+                    max_turns=max_turns,
+                )
+                await websocket.close(
+                    code=WS_CLOSE_MAX_TURNS,
+                    reason="session turn limit reached",
+                )
+                return
+            turns_accepted += 1
 
             previous_response_id, sequence = await _handle_transcript(
                 websocket=websocket,
@@ -577,12 +684,32 @@ async def interview_ws(
                 history_queue=history_queue,
                 provider=provider,
                 avatar_session_id=avatar_session_id,
+                turn_id=client_turn_id,
             )
+
+    async def _duration_watchdog() -> None:
+        """
+        Hard ceiling on a single WS session — matches simli_max_session_length
+        so the upstream avatar timeout and the backend timeout coincide.
+        Closing the WS cancels the reader and processor (and any in-flight
+        OpenAI/ElevenLabs stream) via the TaskGroup, same as a client disconnect.
+        """
+        await asyncio.sleep(settings.session_max_age_seconds)
+        log.info(
+            "ws_max_duration_reached",
+            session_id=str(session_id),
+            max_age_seconds=settings.session_max_age_seconds,
+        )
+        await websocket.close(
+            code=WS_CLOSE_MAX_DURATION,
+            reason="session duration limit reached",
+        )
 
     try:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(_reader(), name="ws-reader")
             tg.create_task(_processor(), name="ws-processor")
+            tg.create_task(_duration_watchdog(), name="ws-duration-watchdog")
     except* WebSocketDisconnect:
         log.info("ws_disconnected", session_id=str(session_id))
     except* Exception as eg:
@@ -596,3 +723,18 @@ async def interview_ws(
         # provider can't keep this handler hanging.
         if provider.mode in ("text", "audio_pcm_server") and avatar_session_id:
             await provider.close(avatar_session_id)
+        # Defense-in-depth DB close. Frontend pagehide DELETE may race with us
+        # or fail entirely (browser killed, fetch keepalive dropped); the
+        # close-on-disconnect here means the WS is the authoritative end-of-session
+        # signal. Idempotent on the SELECT inside close_session_if_active.
+        try:
+            async with AsyncSessionLocal() as db:
+                outcome = await close_session_if_active(db, session_id)
+            if outcome == "ended":
+                log.info("session_closed_on_ws_finally", session_id=str(session_id))
+        except Exception as exc:
+            log.warning(
+                "session_close_on_ws_finally_failed",
+                session_id=str(session_id),
+                error=str(exc),
+            )
