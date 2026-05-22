@@ -12,6 +12,13 @@
  * flushed on open instead of being silently dropped.
  */
 
+import {
+  currentTurnId,
+  mark as markTiming,
+  setTimingSink,
+  type TimingSummary,
+} from "./timing";
+
 export type AudioHandler = (pcm: Uint8Array, immediate: boolean) => void;
 
 const MAX_BACKOFF_MS = 30_000;
@@ -53,6 +60,10 @@ export class InterviewWebSocket {
     this.onStatus = onStatus;
     this.provider = options?.provider;
     this.avatarSessionId = options?.avatarSessionId;
+    // Route the per-turn timing summary out over this socket. The sink is a
+    // module-level singleton so close() must clear it; otherwise a freshly
+    // opened socket from a later session inherits a stale sink reference.
+    setTimingSink((summary) => this._sendTimingSummary(summary));
   }
 
   connect(): void {
@@ -89,6 +100,10 @@ export class InterviewWebSocket {
       const isAligned = pcmLen % 2 === 0;
       const now = performance.now();
       const gapMs = _lastFrameTs > 0 ? now - _lastFrameTs : null;
+      // Mark the FIRST PCM frame of this turn. The timing module ignores
+      // re-marks within a turn, so subsequent chunks for the same turn are
+      // free — no need to gate on _frameCount here.
+      if (immediate) markTiming("first_pcm");
       _lastFrameTs = now;
 
       if (!isAligned) {
@@ -129,7 +144,12 @@ export class InterviewWebSocket {
   }
 
   sendTranscript(text: string): void {
-    this._send({ type: "transcript", text });
+    // Tag the transcript with the current turn_id so the backend can
+    // correlate its per-stage timings and the eventual client_timing
+    // summary onto the same turn in Loki.
+    const turn_id = currentTurnId();
+    markTiming("ws_send");
+    this._send({ type: "transcript", text, turn_id });
   }
 
   sendSkip(): void {
@@ -143,7 +163,22 @@ export class InterviewWebSocket {
       this.reconnectTimer = null;
     }
     this.outboundQueue = [];
+    setTimingSink(null);
     this.ws?.close();
+  }
+
+  private _sendTimingSummary(summary: TimingSummary): void {
+    this._send({
+      type: "client_timing",
+      turn_id: summary.turn_id,
+      events: {
+        audio_capture_start_ms: summary.audio_capture_start_ms,
+        webspeech_final_ms: summary.webspeech_final_ms,
+        ws_send_ms: summary.ws_send_ms,
+        first_pcm_ms: summary.first_pcm_ms,
+        first_frame_rendered_ms: summary.first_frame_rendered_ms,
+      },
+    });
   }
 
   private _send(payload: object): void {
