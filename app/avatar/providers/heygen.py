@@ -60,6 +60,10 @@ class _SessionState:
     ws_url: str
     ws: ClientConnection | None = None
     ws_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Orphaned first byte of a PCM16 sample when ElevenLabs emits an odd-length
+    # chunk; prepended to the next chunk so each agent.speak event contains only
+    # complete 2-byte samples. Reset to b"" on every send_pcm_end.
+    carry: bytes = b""
 
 
 class HeyGenSessionProvider(AvatarSessionProvider):
@@ -172,12 +176,24 @@ class HeyGenSessionProvider(AvatarSessionProvider):
         if state is None:
             raise RuntimeError(f"unknown LiveAvatar session_id: {avatar_session_id!r}")
 
+        # ElevenLabs pcm_24000 returns odd-length chunks ~70% of the time;
+        # forwarding them as-is leaves LiveAvatar's PCM16 decoder one byte out
+        # of phase and produces a loud screech at end-of-utterance. Hold the
+        # orphan byte and prepend to the next chunk so every agent.speak event
+        # ends on a complete sample.
+        buf = state.carry + pcm
+        aligned_len = len(buf) & ~1
+        state.carry = buf[aligned_len:]
+        if aligned_len == 0:
+            return
+        aligned_pcm = buf[:aligned_len]
+
         async def _send() -> None:
             ws = await self._ensure_ws(state)
             await ws.send(json.dumps({
                 "type": "agent.speak",
                 "event_id": str(uuid.uuid4()),
-                "audio": base64.b64encode(pcm).decode("ascii"),
+                "audio": base64.b64encode(aligned_pcm).decode("ascii"),
             }))
 
         await self._cb.call(_send)
@@ -186,6 +202,27 @@ class HeyGenSessionProvider(AvatarSessionProvider):
         state = self._sessions.get(avatar_session_id)
         if state is None or state.ws is None:
             return
+
+        # Pad any orphan half-sample with a silence byte and flush it before
+        # finalising the utterance, otherwise the decoder hits speak_end with
+        # a partial sample queued and produces a noise burst.
+        if state.carry:
+            padded = state.carry + b"\x00"
+            state.carry = b""
+            log.info(
+                "liveavatar_carry_byte_padded",
+                detail="ElevenLabs utterance ended on odd byte; padded final half-sample with silence",
+            )
+
+            async def _send_pad() -> None:
+                assert state.ws is not None
+                await state.ws.send(json.dumps({
+                    "type": "agent.speak",
+                    "event_id": str(uuid.uuid4()),
+                    "audio": base64.b64encode(padded).decode("ascii"),
+                }))
+
+            await self._cb.call(_send_pad)
 
         async def _send() -> None:
             assert state.ws is not None
