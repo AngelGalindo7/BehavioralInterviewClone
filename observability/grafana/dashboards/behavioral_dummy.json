@@ -80,6 +80,108 @@
           "expr": "{job=\"behavioral-dummy\", level=\"error\"}"
         }
       ]
+    },
+    {
+      "id": 6,
+      "title": "Per-stage latency waterfall (p95, last 1h)",
+      "description": "Browser→browser waterfall for the latency-budget blog post. Stages run in series: audio_capture_start → webspeech_final → ws_send → llm_ttft → tts_first_chunk → first_pcm (browser) → first_frame_rendered. Use the snapshot_panel.sh script to freeze a copy before/after each optimisation.",
+      "type": "bargauge",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 20 },
+      "datasource": "Loki",
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 250 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"turn_stage_timing\" | llm_ttft_ms != \"\" | unwrap llm_ttft_ms [1h]) by ()",
+          "legendFormat": "llm_ttft",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"turn_stage_timing\" | llm_total_ms != \"\" | unwrap llm_total_ms [1h]) by ()",
+          "legendFormat": "llm_total",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"turn_stage_timing\" | tts_first_chunk_ms != \"\" | unwrap tts_first_chunk_ms [1h]) by ()",
+          "legendFormat": "tts_first_chunk",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"turn_stage_timing\" | tts_total_ms != \"\" | unwrap tts_total_ms [1h]) by ()",
+          "legendFormat": "tts_total",
+          "instant": true
+        },
+        {
+          "refId": "E",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"client_stage_timing\" | webspeech_final_ms != \"\" | unwrap webspeech_final_ms [1h]) by ()",
+          "legendFormat": "client_webspeech_final",
+          "instant": true
+        },
+        {
+          "refId": "F",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"client_stage_timing\" | first_pcm_ms != \"\" | unwrap first_pcm_ms [1h]) by ()",
+          "legendFormat": "client_first_pcm",
+          "instant": true
+        },
+        {
+          "refId": "G",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"client_stage_timing\" | first_frame_rendered_ms != \"\" | unwrap first_frame_rendered_ms [1h]) by ()",
+          "legendFormat": "client_first_frame",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Per-stage latency over time (p95)",
+      "description": "Stacked p95 trend for each waterfall stage. Use alongside panel 6 to see if a specific stage is regressing.",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 20 },
+      "datasource": "Loki",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line", "stacking": { "mode": "normal" }, "fillOpacity": 25 }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"turn_stage_timing\" | llm_ttft_ms != \"\" | unwrap llm_ttft_ms [5m]) by ()",
+          "legendFormat": "llm_ttft"
+        },
+        {
+          "refId": "B",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"turn_stage_timing\" | tts_first_chunk_ms != \"\" | unwrap tts_first_chunk_ms [5m]) by ()",
+          "legendFormat": "tts_first_chunk"
+        },
+        {
+          "refId": "C",
+          "expr": "quantile_over_time(0.95, {job=\"behavioral-dummy\"} | json | event=\"client_stage_timing\" | first_frame_rendered_ms != \"\" | unwrap first_frame_rendered_ms [5m]) by ()",
+          "legendFormat": "client_first_frame"
+        }
+      ]
     }
   ]
 }
