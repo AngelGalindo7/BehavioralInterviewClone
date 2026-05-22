@@ -10,6 +10,7 @@ import {
   type RecognitionHandle,
 } from "../lib/speechRecognition";
 import { InterviewWebSocket } from "../lib/wsClient";
+import { beginTurn, setVideoElement } from "../lib/timing";
 
 // Fire onFinal after this many ms of silence after the last interim result
 // instead of waiting for Chrome's internal end-of-speech timer (~700–1200 ms).
@@ -90,6 +91,10 @@ export default function InterviewPage() {
         if (!refs?.video || !refs?.audio) {
           throw new Error("Avatar video/audio elements not mounted");
         }
+        // Hand the avatar <video> to the timing module so its
+        // requestVideoFrameCallback can stamp first_frame_rendered for the
+        // waterfall. Cleared in the effect's teardown below.
+        setVideoElement(refs.video);
 
         const provider = getAvatarProvider(selectedProvider);
         avatarProviderRef.current = provider;
@@ -126,16 +131,42 @@ export default function InterviewPage() {
       wsRef.current?.close();
       void avatarProviderRef.current?.destroy();
       avatarProviderRef.current = null;
+      setVideoElement(null);
     };
     // selectedProvider is read on entry to "running"; the toggle is hidden
     // outside the preview phase so re-runs from a mid-session change can't
     // actually happen — listing it in deps is correctness, not behavior.
   }, [phase, selectedProvider]);
 
+  // Tab-close cleanup. Without this, abandoned sessions linger as
+  // ended_at IS NULL rows and burn up to ~60s of Simli idle billing per
+  // session before Simli's own timeout kicks in. fetch keepalive (DELETE)
+  // is the modern replacement for navigator.sendBeacon — sendBeacon is
+  // POST-only, keepalive supports any verb and survives page unload.
+  // Backend has its own WS-finally and reaper safety nets if this fails.
+  useEffect(() => {
+    if (!sessionId) return;
+    const id = sessionId;
+    const fire = () => {
+      try {
+        void fetch(`/session/${id}`, { method: "DELETE", keepalive: true });
+      } catch {
+        // Browser may reject keepalive in narrow conditions (>64KB body, etc.);
+        // the backend reaper closes the orphan within session_reaper_interval.
+      }
+    };
+    window.addEventListener("pagehide", fire);
+    return () => window.removeEventListener("pagehide", fire);
+  }, [sessionId]);
+
   const handleStartListening = useCallback(() => {
     if (!avatarReady) return;
     setInterimText("");
     setIsListening(true);
+    // Open a fresh per-turn timing record. Subsequent marks from
+    // speechRecognition.ts and wsClient.ts attach to this turn until
+    // first_frame_rendered fires and ships the summary.
+    beginTurn();
     recognitionRef.current = startSpeechRecognition(
       (transcript) => {
         setIsListening(false);
