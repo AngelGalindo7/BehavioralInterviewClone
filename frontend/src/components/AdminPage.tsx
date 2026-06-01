@@ -1,25 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  deleteAnecdote,
-  getStories,
-  listAnecdotes,
-  reindex,
-  saveStories,
-  upsertAnecdote,
-  type AnecdoteSummary,
-} from "../lib/adminApi";
+import { getStories, saveStories } from "../lib/adminApi";
 import { logout } from "../lib/auth";
-
-const CORPUS_TITLE = "stories";
 
 export default function AdminPage() {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [busyIngest, setBusyIngest] = useState(false);
-  const [busyClear, setBusyClear] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
-  const [corpus, setCorpus] = useState<AnecdoteSummary | null | undefined>(undefined);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -31,14 +17,8 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    Promise.all([
-      getStories(),
-      listAnecdotes(),
-    ])
-      .then(([text, anecdotes]) => {
-        setContent(text);
-        setCorpus(anecdotes.find((a) => a.source_file === `${CORPUS_TITLE}.md`) ?? null);
-      })
+    getStories()
+      .then((text) => setContent(text))
       .catch(flashErr)
       .finally(() => setLoading(false));
   }, []);
@@ -54,41 +34,6 @@ export default function AdminPage() {
       flashErr(err);
     } finally {
       setBusy(false);
-    }
-  };
-
-  const handleIngest = async () => {
-    if (!content.trim()) return;
-    setBusyIngest(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await saveStories(content);
-      const result = await upsertAnecdote(CORPUS_TITLE, content.trim());
-      await reindex();
-      setCorpus({ source_file: result.source_file, chunks: result.chunks_inserted, created_at: new Date().toISOString() });
-      flash(`Ingested ${result.chunks_inserted} chunks into corpus and rebuilt index.`);
-    } catch (err) {
-      flashErr(err);
-    } finally {
-      setBusyIngest(false);
-    }
-  };
-
-  const handleClear = async () => {
-    if (!confirmClear) { setConfirmClear(true); return; }
-    setBusyClear(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await deleteAnecdote(`${CORPUS_TITLE}.md`);
-      setCorpus(null);
-      setConfirmClear(false);
-      flash("Corpus cleared.");
-    } catch (err) {
-      flashErr(err);
-    } finally {
-      setBusyClear(false);
     }
   };
 
@@ -118,7 +63,7 @@ export default function AdminPage() {
         <div>
           <h1 style={{ fontSize: 18, fontWeight: 600 }}>Stories</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 2 }}>
-            Edit your story corpus. Save updates the system prompt; Ingest pushes it into the RAG database.
+            Edit your story corpus. Save updates the system prompt used by the interviewer.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -146,7 +91,7 @@ export default function AdminPage() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={busy || busyIngest || loading}
+              disabled={busy || loading}
               className="btn btn-ghost"
               style={{ fontSize: 12.5, padding: "6px 12px" }}
             >
@@ -154,19 +99,11 @@ export default function AdminPage() {
             </button>
             <button
               onClick={handleSave}
-              disabled={busy || busyIngest || loading}
-              className="btn btn-ghost"
-              style={{ fontSize: 12.5, padding: "6px 14px" }}
-            >
-              {busy ? "Saving…" : "Save"}
-            </button>
-            <button
-              onClick={handleIngest}
-              disabled={busy || busyIngest || loading || !content.trim()}
+              disabled={busy || loading}
               className="btn btn-primary"
               style={{ fontSize: 12.5, padding: "6px 14px" }}
             >
-              {busyIngest ? "Ingesting…" : "Save & Ingest"}
+              {busy ? "Saving…" : "Save"}
             </button>
           </div>
         </div>
@@ -187,47 +124,6 @@ export default function AdminPage() {
           spellCheck={false}
         />
       </div>
-
-      {/* Corpus status */}
-      {corpus !== undefined && (
-        <div className="surface fade-in" style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-            {corpus === null
-              ? "No corpus in database."
-              : `Corpus: ${corpus.chunks} chunk${corpus.chunks !== 1 ? "s" : ""} in database.`}
-          </span>
-          {corpus !== null && (
-            confirmClear ? (
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Remove all chunks?</span>
-                <button
-                  onClick={handleClear}
-                  disabled={busyClear}
-                  className="btn btn-danger"
-                  style={{ fontSize: 12, padding: "4px 10px" }}
-                >
-                  {busyClear ? "Clearing…" : "Confirm"}
-                </button>
-                <button
-                  onClick={() => setConfirmClear(false)}
-                  className="btn btn-ghost"
-                  style={{ fontSize: 12, padding: "4px 10px" }}
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmClear(true)}
-                className="btn btn-ghost"
-                style={{ fontSize: 12, padding: "4px 10px", color: "var(--danger)" }}
-              >
-                Clear corpus
-              </button>
-            )
-          )}
-        </div>
-      )}
 
       {message && (
         <div className="surface fade-in" style={{ padding: "10px 12px", fontSize: 13 }}>
