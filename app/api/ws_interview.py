@@ -466,29 +466,56 @@ async def _handle_transcript(
                 mode=provider.mode,
             )
 
+    # Decouple LLM token consumption from TTS blocking. Previously,
+    # `await _flush(sentence)` stalled the OpenAI iterator for the full
+    # duration of each ElevenLabs call (~200-400ms + stream time), so
+    # sentence N+1's tokens weren't consumed until N finished playing.
+    # With a sentence queue, _llm_to_queue runs freely while _flush_consumer
+    # streams audio — by the time sentence N finishes, N+1's text is already
+    # queued and ElevenLabs starts immediately, cutting inter-sentence gaps
+    # from (token_wait + EL_latency) down to just EL_latency (~200ms).
+    _sentence_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=4)
+
+    async def _llm_to_queue() -> None:
+        nonlocal full_response, pending_text, last_response_id
+        nonlocal llm_first_token_t, llm_total_t
+        first_sentence_queued = False
+        try:
+            async for delta, resp_id in generate_response(
+                question, system_prompt, previous_response_id, openai_cb
+            ):
+                if llm_first_token_t is None:
+                    llm_first_token_t = time.monotonic()
+                full_response += delta
+                pending_text += delta
+                if resp_id:
+                    last_response_id = resp_id
+                if first_sentence_queued:
+                    to_flush, pending_text = _split_at_boundary(
+                        pending_text, settings.sentence_boundary_max_chars
+                    )
+                else:
+                    to_flush, pending_text = _split_at_first_flush_boundary(
+                        pending_text, settings.first_flush_min_chars
+                    )
+                if to_flush:
+                    first_sentence_queued = True
+                    await _sentence_q.put(to_flush)
+            llm_total_t = time.monotonic()
+            if pending_text.strip():
+                await _sentence_q.put(pending_text.strip())
+        finally:
+            await _sentence_q.put(None)
+
+    async def _flush_consumer() -> None:
+        while True:
+            text = await _sentence_q.get()
+            if text is None:
+                return
+            await _flush(text)
+
     try:
-        async for delta, resp_id in generate_response(
-            question, system_prompt, previous_response_id, openai_cb
-        ):
-            if llm_first_token_t is None:
-                llm_first_token_t = time.monotonic()
-            full_response += delta
-            pending_text += delta
-            if resp_id:
-                last_response_id = resp_id
-            if first_byte_logged:
-                to_flush, pending_text = _split_at_boundary(
-                    pending_text, settings.sentence_boundary_max_chars
-                )
-            else:
-                to_flush, pending_text = _split_at_first_flush_boundary(
-                    pending_text, settings.first_flush_min_chars
-                )
-            if to_flush:
-                await _flush(to_flush)
-        llm_total_t = time.monotonic()
-        if pending_text.strip():
-            await _flush(pending_text)
+        await asyncio.gather(_llm_to_queue(), _flush_consumer())
         if uses_elevenlabs:
             await elevenlabs_cb.on_success()
     except asyncio.CancelledError:
