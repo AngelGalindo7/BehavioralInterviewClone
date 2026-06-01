@@ -57,6 +57,9 @@ class Settings(BaseSettings):
 
     # Security
     frontend_origin: str = "http://localhost:5173"
+    # Set to "none" (and ensure environment="production") when the frontend is
+    # hosted cross-origin (e.g. Vercel). SameSite=None requires Secure=True.
+    cookie_samesite: str = "strict"
     max_ws_text_frame_bytes: int = 4096
 
     # Access gate — single shared passcode + signed-cookie session.
@@ -75,6 +78,21 @@ class Settings(BaseSettings):
     # chars). Short threshold trades a little prosody on the opener for ~200–400 ms
     # less audible TTFB. Subsequent flushes still wait for sentence boundaries.
     first_flush_min_chars: int = 40
+
+    # Session lifecycle / cost caps.
+    # session_max_age_seconds bounds both the server-side WS watchdog and the
+    # orphan reaper. Matches simli_max_session_length so an abandoned tab is
+    # cleaned up no later than Simli's own session timeout.
+    session_max_age_seconds: int = 1800
+    session_reaper_interval_seconds: int = 300
+    # Hard cap on transcripts per WS session — every accepted transcript bills
+    # OpenAI + ElevenLabs even behind the passcode gate. 50 turns ≈ a full 30-min
+    # interview at one question per ~35s, with plenty of headroom.
+    max_turns_per_session: int = 50
+    # Per-turn ceiling on Responses-API output tokens. Bounds blast radius of a
+    # runaway generation (looping model, pathological prompt) before the WS-level
+    # caps kick in. 1024 ≈ ~750 spoken words — well past any natural answer.
+    openai_max_output_tokens: int = 1024
 
     model_config = SettingsConfigDict(
         env_file=".env",

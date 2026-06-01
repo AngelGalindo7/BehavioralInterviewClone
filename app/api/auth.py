@@ -20,8 +20,8 @@ async def login(payload: LoginPayload, response: Response) -> dict:
         value=auth_core.issue_token(),
         max_age=settings.auth_cookie_max_age_seconds,
         httponly=True,
-        secure=settings.environment == "production",
-        samesite="strict",
+        secure=settings.environment == "production" or settings.cookie_samesite == "none",
+        samesite=settings.cookie_samesite,  # type: ignore[arg-type]
         path="/",
     )
     return {"status": "ok"}
