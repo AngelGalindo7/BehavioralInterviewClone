@@ -38,7 +38,7 @@ from typing import ClassVar
 import httpx
 import structlog
 from websockets.asyncio.client import ClientConnection, connect as ws_connect
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from app.avatar.base import AvatarMode, AvatarSessionProvider
 from app.config import settings
@@ -169,7 +169,10 @@ class HeyGenSessionProvider(AvatarSessionProvider):
             state.ws = None
             sep = "&" if "?" in state.ws_url else "?"
             url = f"{state.ws_url}{sep}token={state.session_token}"
-            state.ws = await ws_connect(url, max_size=2 * 1024 * 1024)
+            # ping_interval=None: LiveAvatar's WS server doesn't respond to WebSocket
+            # pings, so the default 20s ping causes our client to close the connection
+            # with 1011 after every idle gap between turns.
+            state.ws = await ws_connect(url, max_size=2 * 1024 * 1024, ping_interval=None)
             log.info("liveavatar_ws_connected", ws_url_host=state.ws_url.split("?")[0])
             return state.ws
 
@@ -203,10 +206,14 @@ class HeyGenSessionProvider(AvatarSessionProvider):
             ws = await self._ensure_ws(state)
             try:
                 await ws.send(payload)
-            except ConnectionClosed:
-                # Abrupt disconnect (e.g. keepalive ping timeout with no close frame)
-                # leaves close_code=None so _ensure_ws can't detect it; clear and retry once.
-                log.info("liveavatar_ws_reconnect", reason="abrupt disconnect on send; reconnecting")
+            except (ConnectionClosed, WebSocketException, OSError) as exc:
+                # Dead socket — either a clean WS close, a protocol error, or a TCP-level
+                # failure (BrokenPipeError etc.). Clear and reconnect once.
+                log.info(
+                    "liveavatar_ws_reconnect",
+                    exc_type=type(exc).__name__,
+                    reason="send failed; reconnecting",
+                )
                 async with state.ws_lock:
                     state.ws = None
                 ws = await self._ensure_ws(state)
