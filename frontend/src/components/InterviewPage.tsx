@@ -256,7 +256,7 @@ export default function InterviewPage() {
     return (
       <div style={pageCenter}>
         <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, maxWidth: 380, textAlign: "center" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600 }}>BehavioralDummy</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 600 }}>Behavioral Clone</h1>
           <p style={{ color: "var(--text-dim)", fontSize: 14 }}>
             Click below to enter the interview view. Nothing is billed until you press Start.
           </p>
@@ -280,7 +280,7 @@ export default function InterviewPage() {
   return (
     <div style={pageStack}>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <h1 style={{ fontSize: 17, fontWeight: 600 }}>BehavioralDummy</h1>
+        <h1 style={{ fontSize: 17, fontWeight: 600 }}>Behavioral Clone</h1>
         {phase === "running" && (
           <StatusBar
             wsStatus={wsStatus}

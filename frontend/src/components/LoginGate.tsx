@@ -54,7 +54,7 @@ export default function LoginGate({ children }: { children: ReactNode }) {
       <div style={shellStyle}>
         <form onSubmit={handleSubmit} className="surface fade-in" style={formStyle}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, textAlign: "center" }}>
-            <h1 style={{ fontSize: 18, fontWeight: 600 }}>BehavioralDummy</h1>
+            <h1 style={{ fontSize: 18, fontWeight: 600 }}>Behavioral Clone</h1>
             <p style={{ color: "var(--text-dim)", fontSize: 13 }}>Enter passcode to continue.</p>
           </div>
           <input
