@@ -57,13 +57,13 @@ from app.deps import (
     get_history_queue,
     get_openai_cb,
 )
+from app.llm.responder import generate_response
+from app.rag.prompt_builder import build_system_prompt
 
 # Custom WS close codes for client-visible end-of-session reasons.
 # 4000-4999 are reserved for application use per RFC 6455.
 WS_CLOSE_MAX_TURNS = 4002
 WS_CLOSE_MAX_DURATION = 4003
-from app.llm.responder import generate_response
-from app.rag.prompt_builder import build_system_prompt
 
 # RAG — retained for re-adoption; see DECISION_LOG.md 05/05/2026
 # from app.rag.embedder import embed_text
