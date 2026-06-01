@@ -11,6 +11,7 @@ import {
 } from "../lib/speechRecognition";
 import { InterviewWebSocket } from "../lib/wsClient";
 import { beginTurn, setVideoElement } from "../lib/timing";
+import { apiUrl } from "../lib/api";
 
 // Fire onFinal after this many ms of silence after the last interim result
 // instead of waiting for Chrome's internal end-of-speech timer (~700–1200 ms).
@@ -38,7 +39,7 @@ export default function InterviewPage() {
   // credentials we hide the toggle entirely rather than offering a button
   // that always 400s.
   useEffect(() => {
-    fetch("/avatar/providers")
+    fetch(apiUrl("/avatar/providers"), { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data && Array.isArray(data.providers)) {
@@ -67,15 +68,15 @@ export default function InterviewPage() {
 
     (async () => {
       try {
-        const sessionResp = await fetch("/session/", { method: "POST" });
+        const sessionResp = await fetch(apiUrl("/session/"), { method: "POST", credentials: "include" });
         if (!sessionResp.ok) throw new Error(`POST /session failed (${sessionResp.status})`);
         const { session_id } = await sessionResp.json();
         if (cancelled) return;
         setSessionId(session_id);
 
         const tokenResp = await fetch(
-          `/avatar/session?provider=${encodeURIComponent(selectedProvider)}`,
-          { method: "POST" },
+          apiUrl(`/avatar/session?provider=${encodeURIComponent(selectedProvider)}`),
+          { method: "POST", credentials: "include" },
         );
         if (!tokenResp.ok) throw new Error(`POST /avatar/session failed (${tokenResp.status})`);
         const tokenData = await tokenResp.json();
@@ -149,7 +150,7 @@ export default function InterviewPage() {
     const id = sessionId;
     const fire = () => {
       try {
-        void fetch(`/session/${id}`, { method: "DELETE", keepalive: true });
+        void fetch(apiUrl(`/session/${id}`), { method: "DELETE", keepalive: true, credentials: "include" });
       } catch {
         // Browser may reject keepalive in narrow conditions (>64KB body, etc.);
         // the backend reaper closes the orphan within session_reaper_interval.
@@ -220,7 +221,7 @@ export default function InterviewPage() {
 
     const idToEnd = sessionId;
     if (idToEnd) {
-      void fetch(`/session/${idToEnd}`, { method: "DELETE" }).catch((err) => {
+      void fetch(apiUrl(`/session/${idToEnd}`), { method: "DELETE", credentials: "include" }).catch((err) => {
         console.warn("DELETE /session failed:", err);
       });
     }

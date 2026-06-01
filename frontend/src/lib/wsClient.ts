@@ -18,6 +18,7 @@ import {
   setTimingSink,
   type TimingSummary,
 } from "./timing";
+import { wsUrl } from "./api";
 
 export type AudioHandler = (pcm: Uint8Array, immediate: boolean) => void;
 
@@ -68,11 +69,10 @@ export class InterviewWebSocket {
 
   connect(): void {
     if (this.closed) return;
-    const protocol = location.protocol === "https:" ? "wss" : "ws";
     const params = new URLSearchParams({ session_id: this.sessionId });
     if (this.provider) params.set("provider", this.provider);
     if (this.avatarSessionId) params.set("avatar_session_id", this.avatarSessionId);
-    const url = `${protocol}://${location.host}/ws/interview?${params.toString()}`;
+    const url = `${wsUrl("/ws/interview")}?${params.toString()}`;
     this.ws = new WebSocket(url);
     this.ws.binaryType = "arraybuffer";
 
