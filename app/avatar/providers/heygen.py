@@ -156,11 +156,16 @@ class HeyGenSessionProvider(AvatarSessionProvider):
         return await self._cb.call(_fetch)
 
     async def _ensure_ws(self, state: _SessionState) -> ClientConnection:
-        if state.ws is not None:
+        # Fast path: connection exists and is still open.
+        if state.ws is not None and state.ws.close_code is None:
             return state.ws
         async with state.ws_lock:
-            if state.ws is not None:
+            if state.ws is not None and state.ws.close_code is None:
                 return state.ws
+            # Connection was closed by the remote (keepalive timeout) — reconnect.
+            if state.ws is not None:
+                log.info("liveavatar_ws_reconnecting", reason="keepalive timeout or remote close")
+            state.ws = None
             sep = "&" if "?" in state.ws_url else "?"
             url = f"{state.ws_url}{sep}token={state.session_token}"
             state.ws = await ws_connect(url, max_size=2 * 1024 * 1024)
