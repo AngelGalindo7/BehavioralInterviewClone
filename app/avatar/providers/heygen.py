@@ -38,6 +38,7 @@ from typing import ClassVar
 import httpx
 import structlog
 from websockets.asyncio.client import ClientConnection, connect as ws_connect
+from websockets.exceptions import ConnectionClosed
 
 from app.avatar.base import AvatarMode, AvatarSessionProvider
 from app.config import settings
@@ -194,12 +195,22 @@ class HeyGenSessionProvider(AvatarSessionProvider):
         aligned_pcm = buf[:aligned_len]
 
         async def _send() -> None:
-            ws = await self._ensure_ws(state)
-            await ws.send(json.dumps({
+            payload = json.dumps({
                 "type": "agent.speak",
                 "event_id": str(uuid.uuid4()),
                 "audio": base64.b64encode(aligned_pcm).decode("ascii"),
-            }))
+            })
+            ws = await self._ensure_ws(state)
+            try:
+                await ws.send(payload)
+            except ConnectionClosed:
+                # Abrupt disconnect (e.g. keepalive ping timeout with no close frame)
+                # leaves close_code=None so _ensure_ws can't detect it; clear and retry once.
+                log.info("liveavatar_ws_reconnect", reason="abrupt disconnect on send; reconnecting")
+                async with state.ws_lock:
+                    state.ws = None
+                ws = await self._ensure_ws(state)
+                await ws.send(payload)
 
         await self._cb.call(_send)
 
