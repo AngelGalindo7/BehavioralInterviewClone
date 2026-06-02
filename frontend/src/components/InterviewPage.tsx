@@ -17,6 +17,10 @@ import { apiUrl } from "../lib/api";
 // instead of waiting for Chrome's internal end-of-speech timer (~700–1200 ms).
 const STT_SILENCE_FALLBACK_MS = 600;
 
+// The UI is HeyGen-only. The backend still registers other providers, but the
+// interview frontend no longer offers a choice — it always drives HeyGen.
+const AVATAR_PROVIDER: AvatarProviderName = "heygen";
+
 type Phase = "landing" | "preview" | "running";
 
 export default function InterviewPage() {
@@ -33,25 +37,6 @@ export default function InterviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [turnError, setTurnError] = useState<string | null>(null);
   const turnErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [selectedProvider, setSelectedProvider] = useState<AvatarProviderName>("simli");
-  const [availableProviders, setAvailableProviders] = useState<string[]>(["simli"]);
-
-  // Discover which providers the backend has actually built. HeyGen only
-  // registers when its env vars are set, so on deployments without HeyGen
-  // credentials we hide the toggle entirely rather than offering a button
-  // that always 400s.
-  useEffect(() => {
-    fetch(apiUrl("/avatar/providers"), { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data && Array.isArray(data.providers)) {
-          setAvailableProviders(data.providers);
-        }
-      })
-      .catch(() => {
-        /* keep the safe default of just ["simli"] */
-      });
-  }, []);
 
   const wsRef = useRef<InterviewWebSocket | null>(null);
   const recognitionRef = useRef<RecognitionHandle | null>(null);
@@ -77,7 +62,7 @@ export default function InterviewPage() {
         setSessionId(session_id);
 
         const tokenResp = await fetch(
-          apiUrl(`/avatar/session?provider=${encodeURIComponent(selectedProvider)}`),
+          apiUrl(`/avatar/session?provider=${encodeURIComponent(AVATAR_PROVIDER)}`),
           { method: "POST", credentials: "include" },
         );
         if (!tokenResp.ok) throw new Error(`POST /avatar/session failed (${tokenResp.status})`);
@@ -99,7 +84,7 @@ export default function InterviewPage() {
         // waterfall. Cleared in the effect's teardown below.
         setVideoElement(refs.video);
 
-        const provider = getAvatarProvider(selectedProvider);
+        const provider = getAvatarProvider(AVATAR_PROVIDER);
         avatarProviderRef.current = provider;
 
         await provider.init({
@@ -121,7 +106,7 @@ export default function InterviewPage() {
           (pcm, immediate) => provider.sendAudio(pcm, immediate),
           (status) => setWsStatus(status),
           {
-            provider: selectedProvider,
+            provider: AVATAR_PROVIDER,
             avatarSessionId,
             onTurnError: (msg) => {
               if (turnErrorTimerRef.current) clearTimeout(turnErrorTimerRef.current);
@@ -144,10 +129,7 @@ export default function InterviewPage() {
       avatarProviderRef.current = null;
       setVideoElement(null);
     };
-    // selectedProvider is read on entry to "running"; the toggle is hidden
-    // outside the preview phase so re-runs from a mid-session change can't
-    // actually happen — listing it in deps is correctness, not behavior.
-  }, [phase, selectedProvider]);
+  }, [phase]);
 
   // Tab-close cleanup. Without this, abandoned sessions linger as
   // ended_at IS NULL rows and burn up to ~60s of Simli idle billing per
@@ -345,23 +327,6 @@ export default function InterviewPage() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           {!confirmingStart ? (
             <>
-              {availableProviders.length > 1 && (
-                <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-                  {availableProviders.map((name) => {
-                    const active = selectedProvider === name;
-                    return (
-                      <button
-                        key={name}
-                        onClick={() => setSelectedProvider(name as AvatarProviderName)}
-                        className={active ? "btn btn-primary" : "btn btn-ghost"}
-                        style={{ padding: "5px 12px", fontSize: 12 }}
-                      >
-                        {name === "simli" ? "Simli (fast)" : name === "heygen" ? "HeyGen (photoreal)" : name}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
               <button
                 onClick={() => setConfirmingStart(true)}
                 className="btn btn-primary"
