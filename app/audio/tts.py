@@ -45,6 +45,7 @@ async def stream_tts_pcm(
     text: str,
     history_delete_queue: asyncio.Queue[str],
     output_format: str | None = None,
+    previous_text: str | None = None,
 ) -> AsyncIterator[bytes]:
     """
     Stream PCM16 audio bytes from ElevenLabs for *text*.
@@ -75,6 +76,7 @@ async def stream_tts_pcm(
             text=text,
             model_id=settings.elevenlabs_model_id,
             output_format=fmt,
+            previous_text=previous_text,
             voice_settings=VoiceSettings(
                 stability=settings.elevenlabs_stability,
                 similarity_boost=settings.elevenlabs_similarity_boost,

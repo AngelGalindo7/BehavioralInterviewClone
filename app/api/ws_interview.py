@@ -346,6 +346,7 @@ async def _handle_transcript(
 
     flush_index = 0
     flush_end_time: float | None = None
+    previous_tts_text: str | None = None
 
     async def _timed_tts_stream(
         text_to_speak: str,
@@ -358,7 +359,8 @@ async def _handle_transcript(
         """
         nonlocal tts_first_chunk_t
         async for chunk in stream_tts_pcm(
-            text_to_speak, history_queue, output_format=tts_output_format
+            text_to_speak, history_queue, output_format=tts_output_format,
+            previous_text=previous_tts_text,
         ):
             if tts_first_chunk_t is None:
                 tts_first_chunk_t = time.monotonic()
@@ -366,7 +368,7 @@ async def _handle_transcript(
 
     async def _flush(text_to_speak: str) -> None:
         nonlocal first_byte_logged, flush_index, flush_end_time
-        nonlocal first_flush_start_t, last_flush_end_t
+        nonlocal first_flush_start_t, last_flush_end_t, previous_tts_text
         if not text_to_speak.strip():
             return
         # CB check moved here from the pre-LLM position. Lets OpenAI streaming
@@ -456,6 +458,7 @@ async def _handle_transcript(
                 total_pcm_bytes=total_pcm_bytes,
                 is_total_pcm_aligned=total_pcm_bytes % 2 == 0,
             )
+        previous_tts_text = text_to_speak
         if not first_byte_logged:
             first_byte_logged = True
             log.info(
