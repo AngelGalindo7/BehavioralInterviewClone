@@ -39,6 +39,7 @@ import httpx
 import structlog
 from websockets.asyncio.client import ClientConnection, connect as ws_connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
+from websockets.protocol import State as WsState
 
 from app.avatar.base import AvatarMode, AvatarSessionProvider
 from app.config import settings
@@ -158,10 +159,10 @@ class HeyGenSessionProvider(AvatarSessionProvider):
 
     async def _ensure_ws(self, state: _SessionState) -> ClientConnection:
         # Fast path: connection exists and is still open.
-        if state.ws is not None and state.ws.close_code is None:  # type: ignore[attr-defined]
+        if state.ws is not None and state.ws.state is WsState.OPEN:
             return state.ws
         async with state.ws_lock:
-            if state.ws is not None and state.ws.close_code is None:  # type: ignore[attr-defined]
+            if state.ws is not None and state.ws.state is WsState.OPEN:
                 return state.ws
             # Connection was closed by the remote (keepalive timeout) — reconnect.
             if state.ws is not None:
