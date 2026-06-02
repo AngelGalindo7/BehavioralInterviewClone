@@ -36,6 +36,9 @@ export interface InterviewWebSocketOptions {
   // needs this id to route streaming.task/stop calls to the right upstream
   // session. Ignored by audio_pcm providers.
   avatarSessionId?: string;
+  // Called when the backend signals a per-turn pipeline failure via a JSON
+  // text frame. Distinct from onStatus (connection-level state).
+  onTurnError?: (message: string) => void;
 }
 
 export class InterviewWebSocket {
@@ -43,6 +46,7 @@ export class InterviewWebSocket {
   private sessionId: string;
   private onAudio: AudioHandler;
   private onStatus: (status: string) => void;
+  private onTurnError: ((message: string) => void) | undefined;
   private provider: string | undefined;
   private avatarSessionId: string | undefined;
   private attempt = 0;
@@ -59,6 +63,7 @@ export class InterviewWebSocket {
     this.sessionId = sessionId;
     this.onAudio = onAudio;
     this.onStatus = onStatus;
+    this.onTurnError = options?.onTurnError;
     this.provider = options?.provider;
     this.avatarSessionId = options?.avatarSessionId;
     // Route the per-turn timing summary out over this socket. The sink is a
@@ -89,6 +94,17 @@ export class InterviewWebSocket {
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
+      if (typeof event.data === "string") {
+        try {
+          const msg = JSON.parse(event.data) as { type?: string; message?: string };
+          if (msg.type === "error") {
+            this.onTurnError?.(msg.message ?? "Something went wrong.");
+          }
+        } catch {
+          console.warn("[AUDIO-WS] unhandled text frame:", event.data);
+        }
+        return;
+      }
       if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 2) {
         console.warn("[AUDIO-WS] received non-audio or too-small frame, byteLength:", event.data instanceof ArrayBuffer ? event.data.byteLength : typeof event.data);
         return;

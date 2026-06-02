@@ -31,6 +31,8 @@ export default function InterviewPage() {
   const [lastQuestion, setLastQuestion] = useState("");
   const [interimText, setInterimText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [turnError, setTurnError] = useState<string | null>(null);
+  const turnErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<AvatarProviderName>("simli");
   const [availableProviders, setAvailableProviders] = useState<string[]>(["simli"]);
 
@@ -118,7 +120,15 @@ export default function InterviewPage() {
           session_id,
           (pcm, immediate) => provider.sendAudio(pcm, immediate),
           (status) => setWsStatus(status),
-          { provider: selectedProvider, avatarSessionId },
+          {
+            provider: selectedProvider,
+            avatarSessionId,
+            onTurnError: (msg) => {
+              if (turnErrorTimerRef.current) clearTimeout(turnErrorTimerRef.current);
+              setTurnError(msg);
+              turnErrorTimerRef.current = setTimeout(() => setTurnError(null), 5000);
+            },
+          },
         );
         wsRef.current = ws;
         ws.connect();
@@ -309,6 +319,25 @@ export default function InterviewPage() {
         <p style={{ color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
           Initialising session…
         </p>
+      )}
+
+      {phase === "running" && turnError && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <div
+            className="fade-in"
+            style={{
+              color: "var(--danger)",
+              fontSize: 12.5,
+              textAlign: "center",
+              padding: "6px 14px",
+              background: "rgba(229, 72, 77, 0.07)",
+              border: "1px solid rgba(229, 72, 77, 0.25)",
+              borderRadius: 6,
+            }}
+          >
+            {turnError}
+          </div>
+        </div>
       )}
 
       {phase === "preview" && (
