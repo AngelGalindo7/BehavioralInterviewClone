@@ -18,12 +18,19 @@ def _db_override(mock_session):
     return _inner
 
 
-def _found_db(fake_row=None):
-    """Mock DB session where SELECT returns a row and UPDATE succeeds."""
+def _found_db(fake_row=None, ended_at=None):
+    """Mock DB session where SELECT returns a row and UPDATE succeeds.
+
+    *ended_at* defaults to None so close_session_if_active treats the row as
+    active and proceeds to UPDATE. Pass a datetime to simulate an already-ended
+    session (the idempotent path).
+    """
     db = AsyncMock()
-    row = fake_row or MagicMock()
+    if fake_row is None:
+        fake_row = MagicMock()
+        fake_row.ended_at = ended_at
     select_result = MagicMock()
-    select_result.scalar_one_or_none.return_value = row
+    select_result.scalar_one_or_none.return_value = fake_row
     db.execute.side_effect = [select_result, MagicMock()]
     return db
 
@@ -131,3 +138,21 @@ def test_end_session_invalid_uuid_returns_422(lifespan_mocks, auth_cookies):
         resp = client.delete("/session/not-a-uuid")
 
     assert resp.status_code == 422
+
+
+def test_end_session_already_ended_is_idempotent(lifespan_mocks, auth_cookies):
+    """Repeat DELETE (e.g. pagehide + WS finally race) must not overwrite the
+    first ended_at timestamp — close_session_if_active short-circuits."""
+    from datetime import datetime, timezone
+
+    mock_db = _found_db(ended_at=datetime.now(timezone.utc).replace(tzinfo=None))
+    app = create_app()
+    app.dependency_overrides[get_db] = _db_override(mock_db)
+    with TestClient(app, cookies=auth_cookies) as client:
+        resp = client.delete(f"/session/{uuid.uuid4()}")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ended"}
+    # SELECT ran, but no UPDATE — only one execute call.
+    assert mock_db.execute.call_count == 1
+    mock_db.commit.assert_not_called()
