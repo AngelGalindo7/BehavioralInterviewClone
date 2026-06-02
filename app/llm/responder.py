@@ -46,6 +46,7 @@ async def generate_response(
             input=question,
             stream=True,
             max_output_tokens=settings.openai_max_output_tokens,
+            temperature=0.4,
         )
         if previous_response_id:
             params["previous_response_id"] = previous_response_id
