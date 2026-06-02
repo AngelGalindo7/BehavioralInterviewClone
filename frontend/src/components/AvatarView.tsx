@@ -31,8 +31,8 @@ const AvatarView = forwardRef<
         width: "100%",
         maxWidth: 460,
         aspectRatio: "1 / 1",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
+        background: "radial-gradient(ellipse at 50% 35%, var(--tile-top) 0%, var(--tile-bot) 100%)",
+        border: "1px solid var(--line)",
         borderRadius: 12,
         overflow: "hidden",
       }}

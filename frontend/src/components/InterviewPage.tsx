@@ -267,14 +267,14 @@ export default function InterviewPage() {
     return (
       <div style={pageCenter}>
         <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, maxWidth: 380, textAlign: "center" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600 }}>Behavioral Clone</h1>
-          <p style={{ color: "var(--text-dim)", fontSize: 14 }}>
+          <h1 style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-0.01em" }}>Behavioral Clone</h1>
+          <p style={{ color: "var(--text-2)", fontSize: 15 }}>
             Click below to enter the interview view. Nothing is billed until you press Start.
           </p>
           <button
             onClick={() => setPhase("preview")}
             className="btn btn-primary"
-            style={{ padding: "10px 22px" }}
+            style={{ padding: "14px 32px" }}
           >
             Enter session
           </button>
@@ -364,7 +364,7 @@ export default function InterviewPage() {
               <button
                 onClick={() => setConfirmingStart(true)}
                 className="btn btn-primary"
-                style={{ padding: "10px 24px" }}
+                style={{ padding: "14px 32px" }}
               >
                 Start
               </button>
@@ -402,7 +402,7 @@ export default function InterviewPage() {
               onClick={() => setConfirmingStop(true)}
               disabled={stopping}
               className="btn btn-danger-ghost"
-              style={{ padding: "7px 14px", fontSize: 12.5 }}
+              style={{ padding: "14px 22px" }}
             >
               End session
             </button>

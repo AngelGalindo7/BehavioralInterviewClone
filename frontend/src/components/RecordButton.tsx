@@ -19,7 +19,7 @@ export default function RecordButton({
         onClick={isListening ? onStopListening : onStartListening}
         disabled={disabled}
         className={`btn ${isListening ? "btn-danger" : "btn-primary"}`}
-        style={{ padding: "10px 22px", minWidth: 130 }}
+        style={{ padding: "14px 24px", minWidth: 130 }}
       >
         {isListening ? (
           <>
@@ -47,7 +47,7 @@ export default function RecordButton({
         disabled={disabled || isListening}
         title="Interrupt current response"
         className="btn btn-ghost"
-        style={{ padding: "10px 14px" }}
+        style={{ padding: "14px 18px" }}
       >
         Skip
       </button>
