@@ -31,6 +31,7 @@ Disconnect cancellation:
 """
 import asyncio
 import json
+import random
 import re
 import time
 import uuid
@@ -347,6 +348,7 @@ async def _handle_transcript(
     flush_index = 0
     flush_end_time: float | None = None
     previous_tts_text: str | None = None
+    tts_seed = random.randint(0, 999_999_999)
 
     async def _timed_tts_stream(
         text_to_speak: str,
@@ -360,7 +362,7 @@ async def _handle_transcript(
         nonlocal tts_first_chunk_t
         async for chunk in stream_tts_pcm(
             text_to_speak, history_queue, output_format=tts_output_format,
-            previous_text=previous_tts_text,
+            previous_text=previous_tts_text, seed=tts_seed,
         ):
             if tts_first_chunk_t is None:
                 tts_first_chunk_t = time.monotonic()
