@@ -268,9 +268,6 @@ export default function InterviewPage() {
       <div style={pageCenter}>
         <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, maxWidth: 380, textAlign: "center" }}>
           <h1 style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-0.01em" }}>Behavioral Clone</h1>
-          <p style={{ color: "var(--text-2)", fontSize: 15 }}>
-            Click below to enter the interview view. Nothing is billed until you press Start.
-          </p>
           <button
             onClick={() => setPhase("preview")}
             className="btn btn-primary"
@@ -291,7 +288,7 @@ export default function InterviewPage() {
   return (
     <>
       <div style={{ position: "fixed", top: 20, left: 24, zIndex: 10 }}>
-        <h1 style={{ fontSize: 17, fontWeight: 600 }}>Behavioral Clone</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.01em" }}>Behavioral Clone</h1>
       </div>
       <div style={pageStack}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -372,11 +369,6 @@ export default function InterviewPage() {
               >
                 Start
               </button>
-              <p style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", maxWidth: 360 }}>
-                {selectedProvider === "heygen"
-                  ? "Reserves a HeyGen avatar slot. HeyGen runs TTS server-side using your configured voice; expect higher TTFB than Simli."
-                  : "Reserves a Simli avatar slot and opens the OpenAI + ElevenLabs pipeline. Real API credits will be used."}
-              </p>
               <button onClick={handleBackToLanding} className="btn btn-ghost" style={{ padding: "5px 10px", fontSize: 12 }}>
                 Back
               </button>
