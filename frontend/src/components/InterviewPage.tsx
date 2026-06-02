@@ -289,21 +289,25 @@ export default function InterviewPage() {
   const recordDisabled = phase !== "running" || !avatarReady || wsStatus !== "connected";
 
   return (
-    <div style={pageStack}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+    <>
+      <div style={{ position: "fixed", top: 20, left: 24, zIndex: 10 }}>
         <h1 style={{ fontSize: 17, fontWeight: 600 }}>Behavioral Clone</h1>
-        {phase === "running" && (
-          <StatusBar
-            wsStatus={wsStatus}
-            lastQuestion={interimText || lastQuestion}
-            isListening={isListening}
-          />
-        )}
-      </header>
-
-      <div className="fade-in" style={{ display: "flex", justifyContent: "center" }}>
-        <AvatarView ref={avatarRef} state={avatarState} />
       </div>
+      <div style={pageStack}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+          {phase === "running" && (
+            <div style={{ width: "100%", maxWidth: 460, marginBottom: 8 }}>
+              <StatusBar
+                wsStatus={wsStatus}
+                lastQuestion={interimText || lastQuestion}
+                isListening={isListening}
+              />
+            </div>
+          )}
+          <div className="fade-in" style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+            <AvatarView ref={avatarRef} state={avatarState} />
+          </div>
+        </div>
 
       <div style={{ display: "flex", justifyContent: "center" }}>
         <RecordButton
@@ -436,6 +440,7 @@ export default function InterviewPage() {
 
       <a href="/admin" style={{ ...footerLink, alignSelf: "center" }}>Manage stories →</a>
     </div>
+    </>
   );
 }
 
@@ -451,7 +456,7 @@ const pageStack: React.CSSProperties = {
   minHeight: "100vh",
   maxWidth: 640,
   margin: "0 auto",
-  padding: "28px 24px 40px",
+  padding: "72px 24px 40px",
   display: "flex",
   flexDirection: "column",
   gap: 22,

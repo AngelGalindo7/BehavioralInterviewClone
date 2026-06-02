@@ -1,15 +1,15 @@
 :root {
   /* Midnight palette */
-  --bg: #0a0a0b;
-  --bg-2: #0d0d0f;
-  --surface: #111114;
-  --tile-top: #141417;
-  --tile-bot: #0a0a0b;
+  --bg: #1c1c1e;
+  --bg-2: #242426;
+  --surface: #2c2c2e;
+  --tile-top: #323236;
+  --tile-bot: #1c1c1e;
   --line: rgba(255, 255, 255, 0.08);
   /* legacy aliases */
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.15);
-  --surface-2: #16161a;
+  --surface-2: #3a3a3c;
   /* text */
   --text: #EEF1F7;
   --text-2: #99A2B5;
