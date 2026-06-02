@@ -1,10 +1,11 @@
 import asyncio
 import tracemalloc
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import FastAPI
-from sqlalchemy import text
+from sqlalchemy import text, update
 
 from app.config import settings
 from app.db.engine import engine
@@ -71,6 +72,53 @@ def _prewarm_external_clients() -> None:
 #         log.warning("ivfflat_warmup_skipped", reason=str(exc))
 
 
+async def _orphan_session_reaper() -> None:
+    """
+    Periodic sweep that closes interview_sessions left with ended_at IS NULL
+    past settings.session_max_age_seconds. Defense-in-depth: the WS finally
+    block is the primary closer, this catches sessions stranded by backend
+    crashes, hung handlers, or rare WS teardown races. Matches Simli's own
+    max_session_length so the DB never disagrees with the upstream provider
+    about whether a session is still live.
+    """
+    from app.db.engine import AsyncSessionLocal
+    from app.db.models import InterviewSession
+
+    interval = settings.session_reaper_interval_seconds
+    max_age = settings.session_max_age_seconds
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                    seconds=max_age
+                )
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        update(InterviewSession)
+                        .where(
+                            InterviewSession.ended_at.is_(None),
+                            InterviewSession.created_at < cutoff,
+                        )
+                        .values(
+                            ended_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                        )
+                    )
+                    await db.commit()
+                if result.rowcount:
+                    log.info(
+                        "orphan_sessions_reaped",
+                        count=result.rowcount,
+                        max_age_seconds=max_age,
+                    )
+            except Exception as exc:
+                # Never let a single failed sweep kill the reaper — the next
+                # tick will retry. A DB hiccup shouldn't take cleanup offline.
+                log.warning("orphan_session_reaper_sweep_failed", error=str(exc))
+    except asyncio.CancelledError:
+        raise
+
+
 async def _tracemalloc_sampler() -> None:
     """
     Periodic memory snapshot off the request path. Sampling on every Nth request
@@ -106,13 +154,14 @@ async def lifespan(app: FastAPI):
 
     history_task = asyncio.create_task(history_delete_worker(deps.history_delete_queue))
     tracemalloc_task = asyncio.create_task(_tracemalloc_sampler())
+    reaper_task = asyncio.create_task(_orphan_session_reaper())
     log.info("app_startup_complete")
 
     yield
 
-    for task in (history_task, tracemalloc_task):
+    for task in (history_task, tracemalloc_task, reaper_task):
         task.cancel()
-    for task in (history_task, tracemalloc_task):
+    for task in (history_task, tracemalloc_task, reaper_task):
         try:
             await task
         except asyncio.CancelledError:
