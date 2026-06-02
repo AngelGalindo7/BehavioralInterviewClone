@@ -531,10 +531,14 @@ async def _handle_transcript(
         raise
     except CircuitOpenError:
         log.error("circuit_open_during_turn", session_id=str(session_id))
-        # Fallback PCM only goes to providers whose audio sink IS the browser
-        # WS (Simli). Text and pcm_server providers handle their own silence.
         if provider.mode == "audio_pcm":
             await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "Service temporarily unavailable. Please try again."})
+            )
+        except Exception:
+            pass
         _log_stage_timing("circuit_open")
         return previous_response_id, sequence
     except Exception as exc:
@@ -543,6 +547,12 @@ async def _handle_transcript(
             await elevenlabs_cb.on_failure(exc)
         if provider.mode == "audio_pcm":
             await websocket.send_bytes(AUDIO_IMMEDIATE_PREFIX + _FALLBACK_PCM)
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "Something went wrong. Please try again."})
+            )
+        except Exception:
+            pass
         _log_stage_timing("error")
         return previous_response_id, sequence
 
