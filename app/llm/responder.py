@@ -45,6 +45,7 @@ async def generate_response(
             instructions=system_prompt,
             input=question,
             stream=True,
+            max_output_tokens=settings.openai_max_output_tokens,
         )
         if previous_response_id:
             params["previous_response_id"] = previous_response_id
