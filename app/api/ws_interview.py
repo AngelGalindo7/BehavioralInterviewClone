@@ -89,7 +89,8 @@ def _split_at_boundary(text: str, max_chars: int) -> tuple[str, str]:
     """
     Return (to_flush, remaining). Prefer the latest sentence boundary so each
     flush gives ElevenLabs more text per call (better prosody, fewer requests).
-    Force-flush the whole buffer if no boundary found and len >= max_chars.
+    Force-flush at the last word boundary before max_chars to avoid cutting
+    mid-word; falls back to the whole buffer only if no space exists.
     """
     last_match = None
     for m in _SENTENCE_BOUNDARY.finditer(text):
@@ -98,6 +99,9 @@ def _split_at_boundary(text: str, max_chars: int) -> tuple[str, str]:
         end = last_match.end()
         return text[:end], text[end:].lstrip()
     if len(text) >= max_chars:
+        split_pos = text.rfind(" ", 0, max_chars)
+        if split_pos > 0:
+            return text[:split_pos], text[split_pos:].lstrip()
         return text, ""
     return "", text
 
