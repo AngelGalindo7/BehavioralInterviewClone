@@ -82,6 +82,7 @@ _SENTENCE_BOUNDARY = re.compile(r"[.!?](?=\s)|[.!?]$")
 # punctuation (comma, semicolon, colon) so a short opener like "Sure, " can
 # fire TTS immediately instead of waiting for a full sentence.
 _FIRST_FLUSH_BOUNDARY = re.compile(r"[.!?,;:](?=\s)|[.!?,;:]$")
+_TERMINAL_PUNCT = frozenset(".!?,;:")
 
 
 def _split_at_boundary(text: str, max_chars: int) -> tuple[str, str]:
@@ -373,6 +374,11 @@ async def _handle_transcript(
         nonlocal first_flush_start_t, last_flush_end_t, previous_tts_text
         if not text_to_speak.strip():
             return
+        # Force-flushed mid-sentence text has no terminal punctuation; ElevenLabs
+        # generates artifact phonemes when an utterance ends on a bare word.
+        stripped = text_to_speak.rstrip()
+        if stripped and stripped[-1] not in _TERMINAL_PUNCT:
+            text_to_speak = stripped + ","
         # CB check moved here from the pre-LLM position. Lets OpenAI streaming
         # begin without waiting on the breaker lock, and means each flush is
         # independently breaker-aware rather than only the first. Skipped for
