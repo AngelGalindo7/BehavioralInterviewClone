@@ -19,6 +19,7 @@ runs unbounded.
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
+from typing import Any
 
 import structlog
 from openai import AsyncOpenAI
@@ -79,8 +80,9 @@ async def generate_response(
     # aborts the upstream HTTP request) instead of leaking a parked connection.
     # `iter` is the SINGLE iterator used for both the first-token drain and the
     # continued stream, so we never re-enter __aiter__ (which on some stream
-    # types restarts from the first chunk).
-    holder: dict[str, object] = {}
+    # types restarts from the first chunk). Values are heterogeneous SDK handles
+    # (the stream and its single iterator), so the dict is typed Any.
+    holder: dict[str, Any] = {}
 
     async def _open_and_drain() -> str | None:
         stream = await cb.call(_call)
