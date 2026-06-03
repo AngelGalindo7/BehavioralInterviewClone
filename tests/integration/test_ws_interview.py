@@ -38,11 +38,11 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(auth_cookies
     """
     fake_pcm = bytes(6000)
 
-    async def _fake_generate(_q, _sp, _prev, _cb):
+    async def _fake_generate(_messages, _cb):
         # Single-sentence response — flushes once at end-of-stream.
-        yield "Here is my answer.", "resp-id-123"
+        yield "Here is my answer."
 
-    async def _fake_tts(_text, _queue, output_format=None):
+    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, seed=None):
         yield fake_pcm
 
     with (
@@ -114,14 +114,14 @@ async def test_skip_cancels_in_flight_turn(auth_cookies):
     cancellation_observed = threading.Event()
     fake_pcm = bytes(6000)
 
-    async def _fake_generate(_q, _sp, _prev, _cb):
+    async def _fake_generate(_messages, _cb):
         try:
             # Long enough + a boundary so the first flush fires immediately and
             # the client receives bytes, confirming the turn is in flight before
             # we send the skip. Then a long sleep keeps the turn open.
-            yield "First sentence runs long enough to flush eagerly.", "resp-1"
+            yield "First sentence runs long enough to flush eagerly."
             await asyncio.sleep(30)
-            yield "second", "resp-1"
+            yield "second"
         except asyncio.CancelledError:
             cancellation_observed.set()
             raise
@@ -171,21 +171,21 @@ async def test_disconnect_cancels_in_flight_openai_stream(auth_cookies):
     cancellation_observed = threading.Event()
     fake_pcm = bytes(6000)
 
-    async def _fake_generate(_q, _sp, _prev, _cb):
+    async def _fake_generate(_messages, _cb):
         try:
             # Must exceed settings.first_flush_min_chars (40) AND contain a
             # clause/sentence boundary so the first-flush splitter fires
             # immediately — otherwise the sleep below runs to completion before
             # any flush, the test client never receives bytes, and the disconnect
             # check happens after the stream has already finished.
-            yield "First sentence runs long enough to flush eagerly.", "resp-1"
+            yield "First sentence runs long enough to flush eagerly."
             await asyncio.sleep(30)
-            yield "second", "resp-1"
+            yield "second"
         except asyncio.CancelledError:
             cancellation_observed.set()
             raise
 
-    async def _fake_tts(_text, _queue, output_format=None):
+    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, seed=None):
         yield fake_pcm
 
     with (
