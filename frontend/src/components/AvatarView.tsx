@@ -64,8 +64,8 @@ const AvatarView = forwardRef<
 
       {state === "connecting" && (
         <div style={overlayStyle}>
-          <div className="spinner" />
-          <span style={{ color: "var(--text-dim)", fontSize: 13 }}>Connecting…</span>
+          <div className="spinner" style={{ borderTopColor: "var(--connecting)" }} />
+          <span style={{ color: "var(--connecting)", fontSize: 13 }}>Connecting…</span>
         </div>
       )}
     </div>
