@@ -1,6 +1,7 @@
-"""Unit tests for the OpenAI Responses API wrapper (generate_response)."""
+"""Unit tests for the OpenAI Chat Completions wrapper (generate_response)."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -9,38 +10,29 @@ from app.core.circuit_breaker import CircuitBreaker
 from app.core.exceptions import CircuitOpenError
 from app.llm.responder import generate_response
 
-
-# ── Event stubs matching the Responses API stream format ─────────────────────
-
-class _CreatedEvent:
-    type = "response.created"
-
-    def __init__(self, response_id: str):
-        self.response = MagicMock()
-        self.response.id = response_id
+_MESSAGES = [
+    {"role": "system", "content": "sys"},
+    {"role": "user", "content": "q"},
+]
 
 
-class _DeltaEvent:
-    type = "response.output_text.delta"
+# ── Stubs matching the chat.completions stream chunk shape ───────────────────
 
-    def __init__(self, delta: str):
-        self.delta = delta
-
-
-class _OtherEvent:
-    type = "response.done"
+def _chunk(content: str | None):
+    """A chat.completions stream chunk exposing .choices[0].delta.content."""
+    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=content))])
 
 
 class _FakeStream:
-    def __init__(self, *events):
-        self._events = events
+    def __init__(self, *chunks):
+        self._chunks = chunks
 
     def __aiter__(self):
         return self._iter()
 
     async def _iter(self):
-        for event in self._events:
-            yield event
+        for chunk in self._chunks:
+            yield chunk
 
 
 class _HangingStream:
@@ -65,120 +57,42 @@ class _HangingStream:
 @pytest.mark.asyncio
 async def test_generate_response_yields_text_deltas():
     cb = CircuitBreaker("test")
-    stream = _FakeStream(
-        _CreatedEvent("resp-001"),
-        _DeltaEvent("Hello"),
-        _DeltaEvent(", world"),
-    )
+    stream = _FakeStream(_chunk("Hello"), _chunk(", world"))
 
     with patch("app.llm.responder._get_client") as mock_get:
-        mock_get.return_value.responses.create = AsyncMock(return_value=stream)
+        mock_get.return_value.chat.completions.create = AsyncMock(return_value=stream)
+        results = [d async for d in generate_response(_MESSAGES, cb)]
 
-        results = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
-
-    assert len(results) == 2
-    assert results[0][0] == "Hello"
-    assert results[1][0] == ", world"
+    assert results == ["Hello", ", world"]
 
 
 @pytest.mark.asyncio
-async def test_generate_response_captures_response_id_from_created_event():
+async def test_generate_response_skips_empty_and_role_only_chunks():
     cb = CircuitBreaker("test")
-    stream = _FakeStream(
-        _CreatedEvent("resp-abc"),
-        _DeltaEvent("text"),
-    )
+    # role-only first chunk (content None) + an empty delta — both skipped
+    stream = _FakeStream(_chunk(None), _chunk(""), _chunk("hi"))
 
     with patch("app.llm.responder._get_client") as mock_get:
-        mock_get.return_value.responses.create = AsyncMock(return_value=stream)
+        mock_get.return_value.chat.completions.create = AsyncMock(return_value=stream)
+        results = [d async for d in generate_response(_MESSAGES, cb)]
 
-        results = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
-
-    assert results[0][1] == "resp-abc"
+    assert results == ["hi"]
 
 
 @pytest.mark.asyncio
-async def test_generate_response_skips_empty_deltas():
+async def test_generate_response_passes_messages():
+    """The exact messages list must reach the API call unchanged."""
     cb = CircuitBreaker("test")
-    stream = _FakeStream(
-        _CreatedEvent("resp-001"),
-        _DeltaEvent(""),    # empty — must be skipped
-        _DeltaEvent("hi"),
-    )
-
-    with patch("app.llm.responder._get_client") as mock_get:
-        mock_get.return_value.responses.create = AsyncMock(return_value=stream)
-
-        results = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
-
-    assert len(results) == 1
-    assert results[0][0] == "hi"
-
-
-@pytest.mark.asyncio
-async def test_generate_response_ignores_unrelated_event_types():
-    cb = CircuitBreaker("test")
-    stream = _FakeStream(
-        _OtherEvent(),      # should produce no yield
-        _DeltaEvent("ok"),
-    )
-
-    with patch("app.llm.responder._get_client") as mock_get:
-        mock_get.return_value.responses.create = AsyncMock(return_value=stream)
-
-        results = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
-
-    # response_id is "" because no created event arrived before the delta
-    assert len(results) == 1
-    assert results[0][0] == "ok"
-    assert results[0][1] == ""
-
-
-@pytest.mark.asyncio
-async def test_generate_response_passes_previous_response_id():
-    """previous_response_id should appear in the params sent to the API."""
-    cb = CircuitBreaker("test")
-    stream = _FakeStream(_CreatedEvent("resp-002"), _DeltaEvent("x"))
+    stream = _FakeStream(_chunk("x"))
 
     with patch("app.llm.responder._get_client") as mock_get:
         create_mock = AsyncMock(return_value=stream)
-        mock_get.return_value.responses.create = create_mock
-
-        _ = [(d, r) async for d, r in generate_response("q", "sys", "prev-id-99", cb)]
-
-    call_kwargs = create_mock.call_args.kwargs
-    assert call_kwargs.get("previous_response_id") == "prev-id-99"
-
-
-@pytest.mark.asyncio
-async def test_generate_response_omits_previous_response_id_when_none():
-    cb = CircuitBreaker("test")
-    stream = _FakeStream(_CreatedEvent("resp-001"), _DeltaEvent("y"))
-
-    with patch("app.llm.responder._get_client") as mock_get:
-        create_mock = AsyncMock(return_value=stream)
-        mock_get.return_value.responses.create = create_mock
-
-        _ = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
+        mock_get.return_value.chat.completions.create = create_mock
+        _ = [d async for d in generate_response(_MESSAGES, cb)]
 
     call_kwargs = create_mock.call_args.kwargs
-    assert "previous_response_id" not in call_kwargs
-
-
-@pytest.mark.asyncio
-async def test_generate_response_omits_store():
-    """store must not be sent — store=False breaks previous_response_id chaining."""
-    cb = CircuitBreaker("test")
-    stream = _FakeStream(_DeltaEvent("z"))
-
-    with patch("app.llm.responder._get_client") as mock_get:
-        create_mock = AsyncMock(return_value=stream)
-        mock_get.return_value.responses.create = create_mock
-
-        _ = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
-
-    call_kwargs = create_mock.call_args.kwargs
-    assert "store" not in call_kwargs
+    assert call_kwargs["messages"] is _MESSAGES
+    assert call_kwargs["stream"] is True
 
 
 @pytest.mark.asyncio
@@ -189,13 +103,13 @@ async def test_generate_response_retries_on_first_token_stall(monkeypatch):
     monkeypatch.setattr(settings, "openai_first_token_max_attempts", 3)
     cb = CircuitBreaker("test")
     stalled = _HangingStream()
-    healthy = _FakeStream(_CreatedEvent("resp-retry"), _DeltaEvent("hi"))
+    healthy = _FakeStream(_chunk("hi"))
 
     with patch("app.llm.responder._get_client") as mock_get:
-        mock_get.return_value.responses.create = AsyncMock(side_effect=[stalled, healthy])
-        results = [(d, r) async for d, r in generate_response("q", "sys", None, cb)]
+        mock_get.return_value.chat.completions.create = AsyncMock(side_effect=[stalled, healthy])
+        results = [d async for d in generate_response(_MESSAGES, cb)]
 
-    assert results == [("hi", "resp-retry")]
+    assert results == ["hi"]
     assert stalled.closed is True  # stalled request was torn down, not leaked
 
 
@@ -209,9 +123,9 @@ async def test_generate_response_raises_when_all_attempts_stall(monkeypatch):
     streams = [_HangingStream(), _HangingStream()]
 
     with patch("app.llm.responder._get_client") as mock_get:
-        mock_get.return_value.responses.create = AsyncMock(side_effect=streams)
+        mock_get.return_value.chat.completions.create = AsyncMock(side_effect=streams)
         with pytest.raises(asyncio.TimeoutError):
-            async for _ in generate_response("q", "sys", None, cb):
+            async for _ in generate_response(_MESSAGES, cb):
                 pass
 
     assert all(s.closed for s in streams)
@@ -229,5 +143,5 @@ async def test_generate_response_raises_circuit_open_when_cb_open():
         await cb.call(_fail)
 
     with pytest.raises(CircuitOpenError):
-        async for _ in generate_response("q", "sys", None, cb):
+        async for _ in generate_response(_MESSAGES, cb):
             pass

@@ -329,14 +329,14 @@ async def _handle_transcript(
     question: str,
     session_id: uuid.UUID,
     sequence: int,
-    previous_response_id: str | None,
+    history: list[dict[str, str]],
     openai_cb: CircuitBreaker,
     elevenlabs_cb: CircuitBreaker,
     history_queue: asyncio.Queue[str],
     provider: AvatarSessionProvider,
     avatar_session_id: str | None,
     turn_id: str | None = None,
-) -> tuple[str | None, int]:
+) -> int:
     """
     Run the full pipeline for one interviewer question.
     next_sequence only advances if the turn was successfully persisted, so
@@ -409,10 +409,14 @@ async def _handle_transcript(
     # system_prompt = build_system_prompt(anecdotes)
 
     system_prompt = build_system_prompt()
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": question},
+    ]
 
     full_response = ""
     pending_text = ""
-    last_response_id = previous_response_id or ""
     first_chunk_state = {"is_first": True}
 
     flush_index = 0
@@ -557,19 +561,15 @@ async def _handle_transcript(
     _sentence_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=4)
 
     async def _llm_to_queue() -> None:
-        nonlocal full_response, pending_text, last_response_id
+        nonlocal full_response, pending_text
         nonlocal llm_first_token_t, llm_total_t
         first_sentence_queued = False
         try:
-            async for delta, resp_id in generate_response(
-                question, system_prompt, previous_response_id, openai_cb
-            ):
+            async for delta in generate_response(messages, openai_cb):
                 if llm_first_token_t is None:
                     llm_first_token_t = time.monotonic()
                 full_response += delta
                 pending_text += delta
-                if resp_id:
-                    last_response_id = resp_id
                 if first_sentence_queued:
                     to_flush, pending_text = _split_at_boundary(
                         pending_text, settings.sentence_boundary_max_chars
@@ -621,7 +621,7 @@ async def _handle_transcript(
         except Exception:
             pass
         _log_stage_timing("circuit_open")
-        return previous_response_id, sequence
+        return sequence
     except Exception as exc:
         log.error("turn_pipeline_error", session_id=str(session_id), error=str(exc))
         if uses_elevenlabs:
@@ -635,11 +635,11 @@ async def _handle_transcript(
         except Exception:
             pass
         _log_stage_timing("error")
-        return previous_response_id, sequence
+        return sequence
 
     if not full_response.strip():
         _log_stage_timing("empty_response")
-        return last_response_id or None, sequence
+        return sequence
 
     ttfb_ms = (time.monotonic() - t0) * 1000
     log.info(
@@ -656,11 +656,17 @@ async def _handle_transcript(
         sequence=sequence,
         question=question,
         response=full_response,
-        response_id=last_response_id or None,
+        response_id=None,
         ttfb_ms=ttfb_ms,
     )
+    # Append only on a successful, non-empty turn — a cancelled (barge-in) or
+    # errored turn returns earlier without appending, so the abandoned answer
+    # never enters conversation memory. Independent of DB persist so a transient
+    # write failure doesn't drop the running context.
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": full_response})
     next_sequence = sequence + 1 if persisted else sequence
-    return last_response_id or None, next_sequence
+    return next_sequence
 
 
 @router.websocket("/ws/interview")
@@ -760,7 +766,7 @@ async def interview_ws(
             await inbox.put(None)
 
     async def _processor() -> None:
-        previous_response_id: str | None = None
+        history: list[dict[str, str]] = []
         sequence = 0
         turns_accepted = 0
         greeted = False
@@ -855,7 +861,7 @@ async def interview_ws(
                     question=question,
                     session_id=session_id,
                     sequence=sequence,
-                    previous_response_id=previous_response_id,
+                    history=history,
                     openai_cb=openai_cb,
                     elevenlabs_cb=elevenlabs_cb,
                     history_queue=history_queue,
@@ -867,7 +873,7 @@ async def interview_ws(
             )
             current_turn["task"] = turn_task
             try:
-                previous_response_id, sequence = await turn_task
+                sequence = await turn_task
             except asyncio.CancelledError:
                 self_task = asyncio.current_task()
                 # Distinguish a barge-in (the reader cancelled *turn_task*, we are
@@ -887,8 +893,8 @@ async def interview_ws(
                     current_turn["task"] = None
                     raise
                 # Barge-in: sequence stays put (the cancelled turn never
-                # persisted) and previous_response_id is unchanged, so the
-                # abandoned answer never enters the OpenAI conversation chain.
+                # persisted) and history is unchanged (the cancelled turn never
+                # appended), so the abandoned answer never enters the conversation.
                 log.info(
                     "turn_cancelled_on_skip",
                     session_id=str(session_id),
