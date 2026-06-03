@@ -509,7 +509,12 @@ async def _handle_transcript(
                 first_chunk_state["is_first"] = False
                 chunks_sent += 1
                 total_pcm_bytes += len(tts_bytes)
-            await provider.send_pcm_end(avatar_session_id)
+            # No per-flush speak_end here: LiveAvatar treats each agent.speak_end
+            # as the end of a discrete utterance, and the next agent.speak
+            # interrupts whatever is still playing. Since sentence N+1 is streamed
+            # while N is still being spoken, a per-flush end made each sentence cut
+            # off the previous one. The turn sends a single speak_end after the
+            # whole answer (see after the gather below).
             flush_end_time = time.monotonic()
             last_flush_end_t = flush_end_time
             log.info(
@@ -596,6 +601,14 @@ async def _handle_transcript(
 
     try:
         await asyncio.gather(_llm_to_queue(), _flush_consumer())
+        # Finalise the LiveAvatar utterance exactly once, after every sentence
+        # flush has been streamed. A per-flush speak_end (the previous behaviour)
+        # made sentence N+1 interrupt sentence N mid-playback, so the avatar
+        # jumped from the opening sentence to a much later one. flush_index > 0
+        # guards the empty-response case (nothing was spoken, nothing to end).
+        if is_pcm_server_mode and flush_index > 0:
+            assert avatar_session_id is not None  # validated at WS handshake
+            await provider.send_pcm_end(avatar_session_id)
         if uses_elevenlabs:
             await elevenlabs_cb.on_success()
     except asyncio.CancelledError:
