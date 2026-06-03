@@ -292,7 +292,6 @@ export default function InterviewPage() {
               <StatusBar
                 wsStatus={wsStatus}
                 lastQuestion={interimText || lastQuestion}
-                isListening={isListening}
               />
             </div>
           )}

@@ -1,7 +1,6 @@
 interface StatusBarProps {
   wsStatus: string;
   lastQuestion: string;
-  isListening: boolean;
 }
 
 const STATUS_STYLE: Record<string, { dot: string; glow: string }> = {
@@ -10,7 +9,7 @@ const STATUS_STYLE: Record<string, { dot: string; glow: string }> = {
   disconnected: { dot: "#E0726A", glow: "rgba(224, 114, 106, 0.28)" },
 };
 
-export default function StatusBar({ wsStatus, lastQuestion, isListening }: StatusBarProps) {
+export default function StatusBar({ wsStatus, lastQuestion }: StatusBarProps) {
   const s = STATUS_STYLE[wsStatus] ?? { dot: "var(--text-3)", glow: "transparent" };
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, minWidth: 0 }}>
@@ -29,43 +28,17 @@ export default function StatusBar({ wsStatus, lastQuestion, isListening }: Statu
           />
           {wsStatus}
         </span>
-        {isListening && (
-          <span
-            className="pill fade-in"
-            style={{
-              color: "#E0726A",
-              borderColor: "rgba(224, 114, 106, 0.30)",
-              background: "rgba(224, 114, 106, 0.06)",
-            }}
-          >
-            <span
-              className="pulse-dot"
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: "#E0726A",
-                boxShadow: "0 0 0 3px rgba(224, 114, 106, 0.28)",
-                display: "inline-block",
-                flexShrink: 0,
-              }}
-            />
-            Listening
-          </span>
-        )}
       </div>
       {lastQuestion && (
         <div
           className="fade-in text-mono"
           style={{
             color: "var(--text-3)",
-            maxWidth: 320,
+            maxWidth: "100%",
             textAlign: "right",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            whiteSpace: "pre-wrap",
+            overflowWrap: "break-word",
           }}
-          title={lastQuestion}
         >
           {lastQuestion}
         </div>
