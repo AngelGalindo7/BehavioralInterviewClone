@@ -5,8 +5,9 @@ interface StatusBarProps {
 
 const STATUS_STYLE: Record<string, { dot: string; glow: string }> = {
   connected:    { dot: "#46C285", glow: "rgba(70, 194, 133, 0.28)" },
+  connecting:   { dot: "#F0A868", glow: "rgba(240, 168, 104, 0.28)" },
   reconnecting: { dot: "#6D97EF", glow: "rgba(109, 151, 239, 0.28)" },
-  disconnected: { dot: "#F0A868", glow: "rgba(240, 168, 104, 0.28)" },
+  disconnected: { dot: "#E0726A", glow: "rgba(224, 114, 106, 0.28)" },
 };
 
 export default function StatusBar({ wsStatus, lastQuestion }: StatusBarProps) {

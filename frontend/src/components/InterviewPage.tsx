@@ -52,6 +52,10 @@ export default function InterviewPage() {
       return;
     }
 
+    // Session + avatar + WS setup is under way — show "connecting" (orange)
+    // until the socket opens. "disconnected" (red) stays the resting/ended state.
+    setWsStatus("connecting");
+
     let cancelled = false;
 
     (async () => {
