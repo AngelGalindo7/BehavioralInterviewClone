@@ -85,7 +85,7 @@ _FALLBACK_PCM = bytes(settings.pcm_chunk_bytes)
 # turn costs zero OpenAI tokens.
 GREETING_TEXT = (
     "Hey there! I'm Angel's behavioral clone — "
-    "feel free to ask me any behavioral question!"
+    "feel free to ask me any behavioral questions!"
 )
 
 # Upbeat delivery for the opener only (lower stability, higher style). Interview
