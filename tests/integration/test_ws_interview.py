@@ -77,10 +77,11 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(auth_cookies
 
 
 @pytest.mark.asyncio
-async def test_skip_message_is_accepted_silently(auth_cookies):
+async def test_skip_with_no_active_turn_is_a_noop(auth_cookies):
     """
-    Backend now logs and discards skip — the frontend handles the avatar-buffer
-    clear locally via simliClient.ClearBuffer(). No bytes should come back.
+    A skip arriving when no turn is in flight has nothing to cancel — the reader
+    logs a no-op and the socket stays usable. (Mid-turn skip cancellation is
+    covered by test_skip_cancels_in_flight_turn below.)
     """
     with (
         patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
@@ -99,6 +100,64 @@ async def test_skip_message_is_accepted_silently(auth_cookies):
                 # Close the socket; if no bytes were emitted by skip, this is fine.
             # If we got here without the test client raising on receive, the skip
             # path didn't push any bytes. Implicit assertion via no exception.
+
+
+@pytest.mark.asyncio
+async def test_skip_cancels_in_flight_turn(auth_cookies):
+    """
+    A barge-in skip sent while a turn is mid-flight must cancel it, propagating
+    CancelledError into the OpenAI/ElevenLabs async-for loops so upstream
+    token/character billing stops for the audio the user just skipped. Without
+    the fix the skip sat queued behind the turn it was meant to interrupt and
+    the full answer was synthesised and billed regardless.
+    """
+    cancellation_observed = threading.Event()
+    fake_pcm = bytes(6000)
+
+    async def _fake_generate(_q, _sp, _prev, _cb):
+        try:
+            # Long enough + a boundary so the first flush fires immediately and
+            # the client receives bytes, confirming the turn is in flight before
+            # we send the skip. Then a long sleep keeps the turn open.
+            yield "First sentence runs long enough to flush eagerly.", "resp-1"
+            await asyncio.sleep(30)
+            yield "second", "resp-1"
+        except asyncio.CancelledError:
+            cancellation_observed.set()
+            raise
+
+    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, seed=None):
+        yield fake_pcm
+
+    with (
+        patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
+        patch("app.api.ws_interview.stream_tts_pcm", side_effect=_fake_tts),
+        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
+        patch("app.api.ws_interview.Turn"),
+        patch("app.api.ws_interview.AsyncSessionLocal"),
+    ):
+        from app.main import create_app
+        app = create_app()
+
+        with TestClient(app, cookies=auth_cookies) as client:
+            session_id = str(uuid.uuid4())
+            with client.websocket_connect(f"/ws/interview?session_id={session_id}") as ws:
+                ws.send_text(json.dumps({"type": "transcript", "text": "Tell me about yourself."}))
+                ws.receive_bytes()  # turn is now mid-flight
+                ws.send_text(json.dumps({"type": "skip"}))
+                for _ in range(40):
+                    if cancellation_observed.is_set():
+                        break
+                    time.sleep(0.05)
+                # Socket stays open after a barge-in — a follow-up frame must not
+                # raise, proving the skip cancelled the turn without tearing down
+                # the connection (unlike a disconnect).
+                ws.send_text(json.dumps({"type": "unknown"}))
+
+        assert cancellation_observed.is_set(), (
+            "in-flight turn was not cancelled on skip — upstream billing would continue"
+        )
 
 
 @pytest.mark.asyncio
