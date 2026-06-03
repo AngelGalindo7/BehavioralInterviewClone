@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     openai_response_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.35
     rag_top_k: int = 4
+    # OpenAI intermittently parks a request several seconds before its first
+    # token even while we're far under rate limits. Cap time-to-first-token and
+    # re-fire on a fresh request — the stall is intermittent, so a retry almost
+    # always lands fast. Only the FIRST token is bounded; streaming is unbounded
+    # once tokens flow. Tune the timeout from prod logs (openai_first_token_*).
+    openai_first_token_timeout_s: float = 5.0
+    openai_first_token_max_attempts: int = 3
 
     # ElevenLabs
     elevenlabs_api_key: str
