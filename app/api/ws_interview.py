@@ -41,6 +41,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 import structlog
+from elevenlabs import VoiceSettings
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from app.api.session import close_session_if_active
@@ -82,8 +83,17 @@ _FALLBACK_PCM = bytes(settings.pcm_chunk_bytes)
 # ready. Routed straight through TTS (no LLM) so the wording is exact and the
 # turn costs zero OpenAI tokens.
 GREETING_TEXT = (
-    "Hey there, I am Angel's behavioral clone. "
-    "Feel free to ask me any behavioral question."
+    "Hey there! I'm Angel's behavioral clone — "
+    "feel free to ask me any behavioral question!"
+)
+
+# Upbeat delivery for the opener only (lower stability, higher style). Interview
+# answers keep the calmer global profile; see config.elevenlabs_greeting_*.
+_GREETING_VOICE_SETTINGS = VoiceSettings(
+    stability=settings.elevenlabs_greeting_stability,
+    similarity_boost=settings.elevenlabs_similarity_boost,
+    style=settings.elevenlabs_greeting_style,
+    use_speaker_boost=settings.elevenlabs_use_speaker_boost,
 )
 
 # Sentence-ending punctuation followed by whitespace (or EOL). The lookahead
@@ -293,7 +303,8 @@ async def _speak_greeting(
         assert avatar_session_id is not None  # validated at WS handshake
         is_first = True
         async for tts_bytes in stream_tts_pcm(
-            GREETING_TEXT, history_queue, output_format=LIVEAVATAR_TTS_OUTPUT_FORMAT
+            GREETING_TEXT, history_queue, output_format=LIVEAVATAR_TTS_OUTPUT_FORMAT,
+            voice_settings=_GREETING_VOICE_SETTINGS,
         ):
             if not tts_bytes:
                 continue
@@ -304,7 +315,11 @@ async def _speak_greeting(
 
     first_chunk_state = {"is_first": True}
     await _send_audio_chunks(
-        websocket, stream_tts_pcm(GREETING_TEXT, history_queue), first_chunk_state
+        websocket,
+        stream_tts_pcm(
+            GREETING_TEXT, history_queue, voice_settings=_GREETING_VOICE_SETTINGS
+        ),
+        first_chunk_state,
     )
 
 

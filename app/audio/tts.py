@@ -47,6 +47,7 @@ async def stream_tts_pcm(
     output_format: str | None = None,
     previous_text: str | None = None,
     seed: int | None = None,
+    voice_settings: VoiceSettings | None = None,
 ) -> AsyncIterator[bytes]:
     """
     Stream PCM16 audio bytes from ElevenLabs for *text*.
@@ -79,7 +80,7 @@ async def stream_tts_pcm(
             output_format=fmt,
             previous_text=previous_text,
             seed=seed,
-            voice_settings=VoiceSettings(
+            voice_settings=voice_settings or VoiceSettings(
                 stability=settings.elevenlabs_stability,
                 similarity_boost=settings.elevenlabs_similarity_boost,
                 style=settings.elevenlabs_style,

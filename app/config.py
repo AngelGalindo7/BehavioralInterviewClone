@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     elevenlabs_similarity_boost: float = 0.75
     elevenlabs_style: float = 0.30
     elevenlabs_use_speaker_boost: bool = True
+    # Greeting-only overrides for an upbeat opener. Lower stability widens the
+    # prosody range; higher style amplifies the cheerful delivery. Applied only
+    # by _speak_greeting so interview answers keep the calmer profile above.
+    elevenlabs_greeting_stability: float = 0.20
+    elevenlabs_greeting_style: float = 0.55
 
     # Simli — v3 SDK uses /compose/token with these fields
     simli_api_key: str
