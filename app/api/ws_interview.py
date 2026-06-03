@@ -33,6 +33,7 @@ Disconnect cancellation:
   and stopping upstream token/character billing for the in-flight turn.
 """
 import asyncio
+import contextlib
 import json
 import random
 import re
@@ -598,11 +599,12 @@ async def _handle_transcript(
         if uses_elevenlabs:
             await elevenlabs_cb.on_success()
     except asyncio.CancelledError:
-        # Disconnect-driven cancellation: stream aclose runs as the async-for
-        # iterators unwind, which terminates the upstream OpenAI/ElevenLabs
-        # HTTP requests. Re-raise so the TaskGroup unwinds cleanly.
+        # Cancellation (client disconnect, duration cap, or a barge-in skip):
+        # stream aclose runs as the async-for iterators unwind, which terminates
+        # the upstream OpenAI/ElevenLabs HTTP requests and stops their billing
+        # for the remainder of this turn. Re-raise so the caller unwinds cleanly.
         log.info(
-            "turn_cancelled_on_disconnect",
+            "turn_cancelled",
             session_id=str(session_id),
             sequence=sequence,
         )
@@ -711,6 +713,21 @@ async def interview_ws(
 
     inbox: asyncio.Queue[str | None] = asyncio.Queue()
     max_bytes = settings.max_ws_text_frame_bytes
+    # Handle to the turn the processor is currently running, so the reader can
+    # cancel it on a barge-in skip. Single-writer (processor) / single-reader
+    # (this reader); the asyncio single-threaded model makes the dict access
+    # safe without a lock.
+    current_turn: dict[str, asyncio.Task | None] = {"task": None}
+
+    def _is_skip(raw: str) -> bool:
+        # Substring pre-check keeps us from json-parsing every (potentially 4 KB)
+        # transcript frame twice — only frames that could be a skip get parsed.
+        if '"skip"' not in raw:
+            return False
+        try:
+            return json.loads(raw).get("type") == "skip"
+        except (json.JSONDecodeError, AttributeError):
+            return False
 
     async def _reader() -> None:
         try:
@@ -722,6 +739,20 @@ async def interview_ws(
                         size=len(raw),
                         limit=max_bytes,
                     )
+                    continue
+                # Barge-in is a control signal: cancel the in-flight turn
+                # directly instead of queuing the skip behind it in inbox, where
+                # it wouldn't be read until that turn — and all of its billed
+                # ElevenLabs synthesis — had already completed.
+                if _is_skip(raw):
+                    task = current_turn["task"]
+                    if task is not None and not task.done():
+                        log.info("ws_skip_cancelling_turn", session_id=str(session_id))
+                        task.cancel()
+                    else:
+                        log.debug(
+                            "ws_skip_noop_no_active_turn", session_id=str(session_id)
+                        )
                     continue
                 await inbox.put(raw)
         finally:
@@ -746,7 +777,10 @@ async def interview_ws(
 
             msg_type = msg.get("type")
             if msg_type == "skip":
-                log.debug("ws_skip_received", session_id=str(session_id))
+                # Normally intercepted out-of-band in _reader so it can cancel
+                # the in-flight turn immediately; reaching here means no turn was
+                # running when it was sent. Nothing to do.
+                log.debug("ws_skip_no_active_turn", session_id=str(session_id))
                 continue
             if msg_type == "greeting":
                 # Deterministic opener — fired by the client when the avatar is
@@ -810,19 +844,69 @@ async def interview_ws(
                 return
             turns_accepted += 1
 
-            previous_response_id, sequence = await _handle_transcript(
-                websocket=websocket,
-                question=question,
-                session_id=session_id,
-                sequence=sequence,
-                previous_response_id=previous_response_id,
-                openai_cb=openai_cb,
-                elevenlabs_cb=elevenlabs_cb,
-                history_queue=history_queue,
-                provider=provider,
-                avatar_session_id=avatar_session_id,
-                turn_id=client_turn_id,
+            # Run the turn as a child task so _reader can cancel it on a barge-in
+            # skip. Cancelling propagates CancelledError through the OpenAI and
+            # ElevenLabs async-for loops, closing their httpx responses and
+            # stopping upstream token/character billing for audio the user has
+            # already chosen not to hear.
+            turn_task = asyncio.create_task(
+                _handle_transcript(
+                    websocket=websocket,
+                    question=question,
+                    session_id=session_id,
+                    sequence=sequence,
+                    previous_response_id=previous_response_id,
+                    openai_cb=openai_cb,
+                    elevenlabs_cb=elevenlabs_cb,
+                    history_queue=history_queue,
+                    provider=provider,
+                    avatar_session_id=avatar_session_id,
+                    turn_id=client_turn_id,
+                ),
+                name="ws-turn",
             )
+            current_turn["task"] = turn_task
+            try:
+                previous_response_id, sequence = await turn_task
+            except asyncio.CancelledError:
+                self_task = asyncio.current_task()
+                # Distinguish a barge-in (the reader cancelled *turn_task*, we are
+                # not) from our own teardown (disconnect / duration cap cancels
+                # the processor). On 3.11+ a pending cancellation of the awaiting
+                # task surfaces via cancelling(); a clean barge-in leaves it at 0.
+                turn_cancelled_by_skip = turn_task.cancelled() and (
+                    self_task is None or self_task.cancelling() == 0
+                )
+                if not turn_cancelled_by_skip:
+                    # Processor is being torn down. Make sure the orphaned turn
+                    # task can't keep streaming — and billing — after we unwind.
+                    if not turn_task.done():
+                        turn_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await turn_task
+                    current_turn["task"] = None
+                    raise
+                # Barge-in: sequence stays put (the cancelled turn never
+                # persisted) and previous_response_id is unchanged, so the
+                # abandoned answer never enters the OpenAI conversation chain.
+                log.info(
+                    "turn_cancelled_on_skip",
+                    session_id=str(session_id),
+                    sequence=sequence,
+                )
+                # Server-rendered avatars (LiveAvatar) play from a buffer the
+                # browser can't clear; tell the provider to drop the rest of the
+                # utterance so it stops billing for the skipped audio. No-op for
+                # Simli (browser cleared its own buffer). Done after the turn task
+                # has fully unwound so no send_pcm races this interrupt frame.
+                if provider.mode == "audio_pcm_server" and avatar_session_id:
+                    with contextlib.suppress(Exception):
+                        await provider.interrupt(avatar_session_id)
+            finally:
+                # Only clear if this invocation still owns the slot — the
+                # disconnect branch above already cleared and re-raised.
+                if current_turn["task"] is turn_task:
+                    current_turn["task"] = None
 
     async def _duration_watchdog() -> None:
         """
