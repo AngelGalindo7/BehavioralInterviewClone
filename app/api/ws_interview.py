@@ -3,6 +3,9 @@ WebSocket /ws/interview — the real-time interview orchestration core.
 
 Protocol (client → server, JSON text frames, capped at settings.max_ws_text_frame_bytes):
   {"type": "transcript", "text": "<interviewer question>"}
+  {"type": "greeting"}  — play the fixed opener once (TTS only, no LLM); sent by
+                       the client when the avatar is ready. Backend guards
+                       against replay and does not count it against max_turns.
   {"type": "skip"}   — the frontend already called simliClient.ClearBuffer()
                        locally; this just informs the backend (logged for now,
                        skip-driven mid-pipeline cancellation is not yet wired).
@@ -74,6 +77,14 @@ log = structlog.get_logger()
 router = APIRouter()
 
 _FALLBACK_PCM = bytes(settings.pcm_chunk_bytes)
+
+# Fixed opener spoken once per session when the client signals the avatar is
+# ready. Routed straight through TTS (no LLM) so the wording is exact and the
+# turn costs zero OpenAI tokens.
+GREETING_TEXT = (
+    "Hey there, I am Angel's behavioral clone. "
+    "Feel free to ask me any behavioral question."
+)
 
 # Sentence-ending punctuation followed by whitespace (or EOL). The lookahead
 # avoids matching decimals like "3.14"; "e.g. " false-positives are tolerable.
@@ -257,6 +268,44 @@ async def _persist_turn(
             error=str(exc),
         )
         return False
+
+
+async def _speak_greeting(
+    websocket: WebSocket,
+    history_queue: asyncio.Queue[str],
+    provider: AvatarSessionProvider,
+    avatar_session_id: str | None,
+) -> None:
+    """
+    Speak GREETING_TEXT through the same per-provider audio path a normal turn
+    uses, but with no LLM in the loop. Mirrors the provider branch in _flush:
+    text-mode speaks the string directly; audio_pcm_server forwards PCM to the
+    provider socket; audio_pcm (Simli) streams PCM to the browser WS with the
+    1-byte dispatch prefix. Best-effort — a greeting failure must not abort the
+    session, so the caller swallows exceptions.
+    """
+    if provider.mode == "text":
+        assert avatar_session_id is not None  # validated at WS handshake
+        await provider.speak(avatar_session_id, GREETING_TEXT)
+        return
+
+    if provider.mode == "audio_pcm_server":
+        assert avatar_session_id is not None  # validated at WS handshake
+        is_first = True
+        async for tts_bytes in stream_tts_pcm(
+            GREETING_TEXT, history_queue, output_format=LIVEAVATAR_TTS_OUTPUT_FORMAT
+        ):
+            if not tts_bytes:
+                continue
+            await provider.send_pcm(avatar_session_id, tts_bytes, is_first=is_first)
+            is_first = False
+        await provider.send_pcm_end(avatar_session_id)
+        return
+
+    first_chunk_state = {"is_first": True}
+    await _send_audio_chunks(
+        websocket, stream_tts_pcm(GREETING_TEXT, history_queue), first_chunk_state
+    )
 
 
 async def _handle_transcript(
@@ -668,6 +717,7 @@ async def interview_ws(
         previous_response_id: str | None = None
         sequence = 0
         turns_accepted = 0
+        greeted = False
         max_turns = settings.max_turns_per_session
         while True:
             raw = await inbox.get()
@@ -682,6 +732,26 @@ async def interview_ws(
             msg_type = msg.get("type")
             if msg_type == "skip":
                 log.debug("ws_skip_received", session_id=str(session_id))
+                continue
+            if msg_type == "greeting":
+                # Deterministic opener — fired by the client when the avatar is
+                # ready. Once-only guard so a reconnect resend can't replay it.
+                # Not counted against max_turns (no LLM, no billing).
+                if not greeted:
+                    greeted = True
+                    log.info("ws_greeting", session_id=str(session_id))
+                    try:
+                        await _speak_greeting(
+                            websocket, history_queue, provider, avatar_session_id
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        log.warning(
+                            "ws_greeting_failed",
+                            session_id=str(session_id),
+                            error=str(exc),
+                        )
                 continue
             if msg_type == "client_timing":
                 # Frontend per-event waterfall events keyed by the turn_id the
