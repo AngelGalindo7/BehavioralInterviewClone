@@ -42,6 +42,7 @@ export default function InterviewPage() {
   const recognitionRef = useRef<RecognitionHandle | null>(null);
   const avatarRef = useRef<{ video: HTMLVideoElement | null; audio: HTMLAudioElement | null }>(null);
   const avatarProviderRef = useRef<AvatarProvider | null>(null);
+  const greetedRef = useRef(false);
 
   useEffect(() => {
     if (phase !== "running") return;
@@ -131,6 +132,17 @@ export default function InterviewPage() {
     };
   }, [phase]);
 
+  // Deterministic opener. Fires once the avatar has connected AND the WS is
+  // live — both are required so the greeting PCM has somewhere to play. The ref
+  // guard (reset on End session) keeps a status flap from re-greeting; the
+  // backend has its own once-only guard as a second line of defence.
+  useEffect(() => {
+    if (avatarReady && wsStatus === "connected" && !greetedRef.current) {
+      greetedRef.current = true;
+      wsRef.current?.sendGreeting();
+    }
+  }, [avatarReady, wsStatus]);
+
   // Tab-close cleanup. Without this, abandoned sessions linger as
   // ended_at IS NULL rows and burn up to ~60s of Simli idle billing per
   // session before Simli's own timeout kicks in. fetch keepalive (DELETE)
@@ -218,6 +230,7 @@ export default function InterviewPage() {
       });
     }
 
+    greetedRef.current = false;
     setSessionId(null);
     setWsStatus("disconnected");
     setIsListening(false);

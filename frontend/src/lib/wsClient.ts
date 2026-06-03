@@ -172,6 +172,12 @@ export class InterviewWebSocket {
     this._send({ type: "skip" });
   }
 
+  // Request the fixed opener. Backend guards against replay, so a queued frame
+  // flushed after a reconnect won't double-greet.
+  sendGreeting(): void {
+    this._send({ type: "greeting" });
+  }
+
   close(): void {
     this.closed = true;
     if (this.reconnectTimer !== null) {
