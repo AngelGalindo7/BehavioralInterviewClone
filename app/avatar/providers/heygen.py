@@ -257,6 +257,31 @@ class HeyGenSessionProvider(AvatarSessionProvider):
 
         await self._cb.call(_send)
 
+    async def interrupt(self, avatar_session_id: str) -> None:
+        # Barge-in: flush the avatar's server-side speech buffer so it stops
+        # mid-utterance. Without this it plays out the rest of an answer the user
+        # has already skipped — billed LiveAvatar streaming time for audio nobody
+        # hears. Best-effort: a missing session or dead socket means there's
+        # nothing left to interrupt, so we swallow rather than raise into the
+        # barge-in path. Reset carry so the half-sample from the killed utterance
+        # can't bleed into the next one.
+        state = self._sessions.get(avatar_session_id)
+        if state is None or state.ws is None or state.ws.state is not WsState.OPEN:
+            return
+        state.carry = b""
+        try:
+            await state.ws.send(json.dumps({
+                "type": "agent.interrupt",
+                "event_id": str(uuid.uuid4()),
+            }))
+            log.info("liveavatar_interrupted", avatar_session_id=avatar_session_id)
+        except (ConnectionClosed, WebSocketException, OSError) as exc:
+            log.info(
+                "liveavatar_interrupt_send_failed",
+                avatar_session_id=avatar_session_id,
+                exc_type=type(exc).__name__,
+            )
+
     async def close(self, avatar_session_id: str) -> None:
         state = self._sessions.pop(avatar_session_id, None)
         if state is None:

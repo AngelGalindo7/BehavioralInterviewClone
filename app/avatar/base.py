@@ -51,6 +51,18 @@ class AvatarSessionProvider(ABC):
         """
         return None
 
+    async def interrupt(self, avatar_session_id: str) -> None:
+        """
+        Stop the avatar speaking the current utterance immediately (barge-in).
+
+        Only meaningful for server-rendered providers (audio_pcm_server), where
+        the avatar plays out of a server-side buffer the browser can't clear on
+        its own — without this the avatar keeps speaking (and billing) audio the
+        user has already interrupted. Browser-rendered providers (Simli) clear
+        their own jitter buffer client-side, so the default is a no-op.
+        """
+        return None
+
     async def close(self, avatar_session_id: str) -> None:
         """Tear down a server-side session by id. Best-effort; default is no-op."""
         return None
