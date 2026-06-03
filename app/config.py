@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dimensions: int = 1536
     openai_response_model: str = "gpt-4o-mini"
+    openai_temperature: float = 0.35
     rag_top_k: int = 4
 
     # ElevenLabs
