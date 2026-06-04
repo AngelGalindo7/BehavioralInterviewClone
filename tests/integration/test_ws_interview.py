@@ -42,7 +42,7 @@ async def test_transcript_produces_immediate_prefixed_binary_frames(auth_cookies
         # Single-sentence response — flushes once at end-of-stream.
         yield "Here is my answer."
 
-    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, seed=None):
+    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, next_text=None, seed=None):
         yield fake_pcm
 
     with (
@@ -126,7 +126,7 @@ async def test_skip_cancels_in_flight_turn(auth_cookies):
             cancellation_observed.set()
             raise
 
-    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, seed=None):
+    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, next_text=None, seed=None):
         yield fake_pcm
 
     with (
@@ -185,7 +185,7 @@ async def test_disconnect_cancels_in_flight_openai_stream(auth_cookies):
             cancellation_observed.set()
             raise
 
-    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, seed=None):
+    async def _fake_tts(_text, _queue, output_format=None, previous_text=None, next_text=None, seed=None):
         yield fake_pcm
 
     with (

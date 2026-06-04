@@ -426,6 +426,7 @@ async def _handle_transcript(
 
     async def _timed_tts_stream(
         text_to_speak: str,
+        next_text: str | None,
     ) -> AsyncIterator[bytes]:
         """
         Wrap stream_tts_pcm and stamp tts_first_chunk_t on the first PCM byte
@@ -436,13 +437,13 @@ async def _handle_transcript(
         nonlocal tts_first_chunk_t
         async for chunk in stream_tts_pcm(
             text_to_speak, history_queue, output_format=tts_output_format,
-            previous_text=previous_tts_text, seed=tts_seed,
+            previous_text=previous_tts_text, next_text=next_text, seed=tts_seed,
         ):
             if tts_first_chunk_t is None:
                 tts_first_chunk_t = time.monotonic()
             yield chunk
 
-    async def _flush(text_to_speak: str) -> None:
+    async def _flush(text_to_speak: str, next_text: str | None = None) -> None:
         nonlocal first_byte_logged, flush_index, flush_end_time
         nonlocal first_flush_start_t, last_flush_end_t, previous_tts_text
         if not text_to_speak.strip():
@@ -499,7 +500,7 @@ async def _handle_transcript(
             total_pcm_bytes = 0
             chunks_sent = 0
             is_first_chunk = first_chunk_state["is_first"]
-            async for tts_bytes in _timed_tts_stream(text_to_speak):
+            async for tts_bytes in _timed_tts_stream(text_to_speak, next_text):
                 if not tts_bytes:
                     continue
                 await provider.send_pcm(
@@ -529,7 +530,7 @@ async def _handle_transcript(
         else:
             frames_sent, total_pcm_bytes = await _send_audio_chunks(
                 websocket,
-                _timed_tts_stream(text_to_speak),
+                _timed_tts_stream(text_to_speak, next_text),
                 first_chunk_state,
             )
             flush_end_time = time.monotonic()
@@ -593,11 +594,26 @@ async def _handle_transcript(
             await _sentence_q.put(None)
 
     async def _flush_consumer() -> None:
-        while True:
-            text = await _sentence_q.get()
-            if text is None:
-                return
-            await _flush(text)
+        # One-sentence lookahead for prosody: pass the NEXT sentence to ElevenLabs
+        # as next_text so a mid-answer sentence isn't synthesised with
+        # utterance-final intonation (the "sounds like it's wrapping up, then says
+        # something else" + per-sentence tone-shift artefact). The peek is strictly
+        # non-blocking (get_nowait): if the next sentence isn't queued yet we flush
+        # immediately with no lookahead, so first-audio TTFB is never delayed (see
+        # BUG_FIX_LOG 02/05/2026 sentence-streaming fix). On the eager first flush
+        # the next sentence is usually not ready yet, so TTFB stays untouched;
+        # later flushes — where the tone shift is actually heard — usually have it.
+        current = await _sentence_q.get()
+        while current is not None:
+            try:
+                nxt = _sentence_q.get_nowait()
+            except asyncio.QueueEmpty:
+                await _flush(current)
+                current = await _sentence_q.get()
+                continue
+            next_text = nxt if isinstance(nxt, str) else None
+            await _flush(current, next_text)
+            current = nxt  # already dequeued — may be the None end sentinel
 
     try:
         await asyncio.gather(_llm_to_queue(), _flush_consumer())
