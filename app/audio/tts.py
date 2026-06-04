@@ -46,6 +46,7 @@ async def stream_tts_pcm(
     history_delete_queue: asyncio.Queue[str],
     output_format: str | None = None,
     previous_text: str | None = None,
+    next_text: str | None = None,
     seed: int | None = None,
     voice_settings: VoiceSettings | None = None,
 ) -> AsyncIterator[bytes]:
@@ -55,6 +56,12 @@ async def stream_tts_pcm(
     *output_format* overrides settings.elevenlabs_output_format per-call so
     providers with different sample-rate requirements (Simli: 16 kHz, LiveAvatar
     LITE: 24 kHz) can share this function without forcing a global config.
+
+    *previous_text* / *next_text* give ElevenLabs the surrounding sentences as
+    prosody context so a sentence flushed mid-answer isn't synthesised with
+    utterance-final intonation. These are TEXT-only conditioning — unlike
+    previous_request_ids request stitching, they hold no server-side reference,
+    so they don't conflict with the active history deletion below.
 
     Captures history_item_id from the first chunk that exposes alignment data.
     Enqueues for deletion in a finally block so a cancelled stream still cleans
@@ -79,6 +86,7 @@ async def stream_tts_pcm(
             model_id=settings.elevenlabs_model_id,
             output_format=fmt,
             previous_text=previous_text,
+            next_text=next_text,
             seed=seed,
             voice_settings=voice_settings or VoiceSettings(
                 stability=settings.elevenlabs_stability,
