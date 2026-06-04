@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # stability < 0.5 widens prosody range (less monotone) at the cost of more
     # take-to-take variability. style amplifies the voice's natural delivery;
     # leave low if cloned from a flat reference.
-    elevenlabs_stability: float = 0.35
+    elevenlabs_stability: float = 0.5
     elevenlabs_similarity_boost: float = 0.75
     elevenlabs_style: float = 0.30
     elevenlabs_use_speaker_boost: bool = True
