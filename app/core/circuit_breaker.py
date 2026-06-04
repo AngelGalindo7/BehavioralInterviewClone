@@ -39,6 +39,10 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._opened_at: float = 0.0
+        # Admits exactly one probe through call() while HALF_OPEN; concurrent
+        # callers fast-fail so a recovery window sends a single request at a
+        # possibly-still-down upstream instead of a thundering herd.
+        self._probe_in_flight = False
         self._lock = asyncio.Lock()
 
     @property
@@ -72,6 +76,14 @@ class CircuitBreaker:
                     raise CircuitOpenError(self.name)
                 log.info("circuit_half_open", circuit=self.name)
                 self._state = CircuitState.HALF_OPEN
+                self._probe_in_flight = True
+            elif self._state == CircuitState.HALF_OPEN:
+                # A probe is already validating recovery — reject the rest so we
+                # don't stampede an upstream that may still be down. on_success/
+                # on_failure (always reached below) releases the slot.
+                if self._probe_in_flight:
+                    raise CircuitOpenError(self.name)
+                self._probe_in_flight = True
 
         try:
             result = await coro_factory()
@@ -88,10 +100,12 @@ class CircuitBreaker:
                 log.info("circuit_closed", circuit=self.name)
             self._state = CircuitState.CLOSED
             self._failure_count = 0
+            self._probe_in_flight = False
 
     async def _on_failure(self, exc: Exception) -> None:
         async with self._lock:
             self._failure_count += 1
+            self._probe_in_flight = False
             log.warning(
                 "circuit_failure",
                 circuit=self.name,

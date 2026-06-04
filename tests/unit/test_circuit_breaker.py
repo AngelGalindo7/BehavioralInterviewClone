@@ -202,3 +202,35 @@ async def test_on_failure_via_public_method_reopens_half_open():
     await cb.check()  # → HALF_OPEN
     await cb.on_failure(RuntimeError("another"))
     assert cb.state == CircuitState.OPEN
+
+
+@pytest.mark.asyncio
+async def test_half_open_admits_only_one_concurrent_probe():
+    """While one probe validates recovery, concurrent callers must fast-fail so
+    the recovery window doesn't stampede a possibly-still-down upstream."""
+    cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=0.01)
+
+    async def _fail():
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await cb.call(_fail)
+    await asyncio.sleep(0.02)  # recovery window elapses
+
+    probe_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_probe():
+        probe_started.set()
+        await release.wait()
+        return "ok"
+
+    probe_task = asyncio.create_task(cb.call(_slow_probe))
+    await probe_started.wait()  # probe has claimed the single HALF_OPEN slot
+
+    with pytest.raises(CircuitOpenError):
+        await cb.call(_slow_probe)  # second concurrent probe rejected
+
+    release.set()
+    assert await probe_task == "ok"
+    assert cb.state == CircuitState.CLOSED  # slot released, circuit recovered
