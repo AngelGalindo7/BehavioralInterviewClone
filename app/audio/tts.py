@@ -26,6 +26,7 @@ from elevenlabs import VoiceSettings
 from elevenlabs.client import AsyncElevenLabs
 
 from app.config import settings
+from app.core.exceptions import TTSError
 
 log = structlog.get_logger(__name__)
 
@@ -79,22 +80,52 @@ async def stream_tts_pcm(
 
     log.debug("tts_stream_start", text_len=len(text), text_preview=text[:60], output_format=fmt)
 
+    stream = client.text_to_speech.convert_as_stream(
+        voice_id=settings.elevenlabs_voice_id,
+        text=text,
+        model_id=settings.elevenlabs_model_id,
+        output_format=fmt,
+        previous_text=previous_text,
+        next_text=next_text,
+        seed=seed,
+        voice_settings=voice_settings or VoiceSettings(
+            stability=settings.elevenlabs_stability,
+            similarity_boost=settings.elevenlabs_similarity_boost,
+            style=settings.elevenlabs_style,
+            use_speaker_boost=settings.elevenlabs_use_speaker_boost,
+        ),
+    )
+    stream_iter = stream.__aiter__()
+    audio_started = False
     try:
-        async for chunk in client.text_to_speech.convert_as_stream(
-            voice_id=settings.elevenlabs_voice_id,
-            text=text,
-            model_id=settings.elevenlabs_model_id,
-            output_format=fmt,
-            previous_text=previous_text,
-            next_text=next_text,
-            seed=seed,
-            voice_settings=voice_settings or VoiceSettings(
-                stability=settings.elevenlabs_stability,
-                similarity_boost=settings.elevenlabs_similarity_boost,
-                style=settings.elevenlabs_style,
-                use_speaker_boost=settings.elevenlabs_use_speaker_boost,
-            ),
-        ):
+        while True:
+            # Bound the wait until the first audio chunk: a parked ElevenLabs
+            # request would otherwise freeze the avatar until the session
+            # watchdog. Once audio flows the stream runs unbounded (mirrors the
+            # OpenAI first-token guard in responder.py).
+            try:
+                if audio_started:
+                    chunk = await stream_iter.__anext__()
+                else:
+                    chunk = await asyncio.wait_for(
+                        stream_iter.__anext__(), settings.elevenlabs_first_chunk_timeout_s
+                    )
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                # Abort the parked request so it doesn't leak; not every async
+                # iterator exposes aclose(), so probe for it.
+                aclose = getattr(stream_iter, "aclose", None)
+                if aclose is not None:
+                    with contextlib.suppress(Exception):
+                        await aclose()
+                log.warning(
+                    "tts_first_chunk_timeout",
+                    timeout_s=settings.elevenlabs_first_chunk_timeout_s,
+                    text_preview=text[:60],
+                )
+                raise TTSError("ElevenLabs first-chunk timeout") from None
+
             audio_bytes: bytes | None = None
             if isinstance(chunk, bytes):
                 audio_bytes = chunk
@@ -102,6 +133,7 @@ async def stream_tts_pcm(
                 audio_bytes = chunk.audio
 
             if audio_bytes is not None:
+                audio_started = True
                 chunk_len = len(audio_bytes)
                 is_aligned = chunk_len % 2 == 0
                 cumulative_bytes += chunk_len

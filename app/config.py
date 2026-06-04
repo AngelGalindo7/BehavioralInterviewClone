@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     elevenlabs_voice_id: str
     elevenlabs_model_id: str = "eleven_turbo_v2_5"
     elevenlabs_output_format: str = "pcm_16000"
+    # Bound time-to-first-chunk per sentence flush. A parked ElevenLabs request
+    # would otherwise freeze the avatar until the session watchdog (~30 min);
+    # exceeding this aborts the flush so the turn fails fast and trips the EL
+    # circuit breaker. Hang-prevention, not a latency target — keep it well
+    # above the normal first-chunk time (turbo is usually < 1 s).
+    elevenlabs_first_chunk_timeout_s: float = 6.0
     # Voice settings — taste knobs, tune by ear in a real session.
     # stability < 0.5 widens prosody range (less monotone) at the cost of more
     # take-to-take variability. style amplifies the voice's natural delivery;

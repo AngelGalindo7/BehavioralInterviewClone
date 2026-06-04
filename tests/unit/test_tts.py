@@ -11,6 +11,8 @@ from app.audio.tts import (
     history_delete_worker,
     stream_tts_pcm,
 )
+from app.config import settings
+from app.core.exceptions import TTSError
 
 
 @pytest.fixture(autouse=True)
@@ -209,6 +211,29 @@ async def test_stream_tts_pcm_skips_latest_sentinel_on_cancellation():
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+    assert queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_stream_tts_pcm_raises_on_first_chunk_timeout(monkeypatch):
+    """A parked first chunk must abort the flush with TTSError instead of
+    hanging until the session watchdog, and enqueue nothing (no synthesis row
+    is known to exist, so the LATEST sentinel could delete an earlier turn)."""
+    monkeypatch.setattr(settings, "elevenlabs_first_chunk_timeout_s", 0.02)
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    async def _hanging_stream(**_kwargs):
+        await asyncio.sleep(10)  # never yields within the timeout window
+        yield b"\x00"
+
+    mock_client = MagicMock()
+    mock_client.text_to_speech.convert_as_stream = _hanging_stream
+
+    with patch("app.audio.tts.AsyncElevenLabs", return_value=mock_client):
+        with pytest.raises(TTSError):
+            async for _ in stream_tts_pcm("hello", queue):
+                pass
 
     assert queue.empty()
 
