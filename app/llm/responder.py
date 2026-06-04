@@ -85,7 +85,14 @@ async def generate_response(
     holder: dict[str, Any] = {}
 
     async def _open_and_drain() -> str | None:
-        stream = await cb.call(_call)
+        # Open the stream AND drain to the first token here so the whole
+        # first-token acquisition runs under the per-attempt timeout and inside
+        # the breaker (below). cb.call then records success only once a token
+        # actually arrives, and a parked first-token stall surfaces as a
+        # TimeoutError it counts as a failure. Wrapping only stream creation
+        # (which returns before any token) would mark the breaker healthy while
+        # the turn freezes — the exact stall this guard exists to catch.
+        stream = await _call()
         holder["stream"] = stream
         stream_iter = stream.__aiter__()
         holder["iter"] = stream_iter
@@ -100,7 +107,7 @@ async def generate_response(
     for attempt in range(1, max_attempts + 1):
         holder.clear()
         try:
-            first_delta = await asyncio.wait_for(_open_and_drain(), timeout)
+            first_delta = await cb.call(lambda: asyncio.wait_for(_open_and_drain(), timeout))
         except asyncio.TimeoutError:
             stream = holder.get("stream")
             if stream is not None:

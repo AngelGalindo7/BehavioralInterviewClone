@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.config import settings
-from app.core.circuit_breaker import CircuitBreaker
+from app.core.circuit_breaker import CircuitBreaker, CircuitState
 from app.core.exceptions import CircuitOpenError
 from app.llm.responder import generate_response
 
@@ -129,6 +129,27 @@ async def test_generate_response_raises_when_all_attempts_stall(monkeypatch):
                 pass
 
     assert all(s.closed for s in streams)
+
+
+@pytest.mark.asyncio
+async def test_first_token_stall_counts_as_circuit_failure(monkeypatch):
+    """A fully-stalled turn (parks before the first token on every attempt) must
+    register as a circuit failure — a created-but-silent stream is not success.
+    Enough stalled turns must trip the breaker so it can fast-fail the rest."""
+    monkeypatch.setattr(settings, "openai_first_token_timeout_s", 0.02)
+    monkeypatch.setattr(settings, "openai_first_token_max_attempts", 1)
+    cb = CircuitBreaker("test", failure_threshold=2, recovery_timeout=60.0)
+
+    with patch("app.llm.responder._get_client") as mock_get:
+        mock_get.return_value.chat.completions.create = AsyncMock(
+            side_effect=lambda **_: _HangingStream()
+        )
+        for _ in range(2):
+            with pytest.raises(asyncio.TimeoutError):
+                async for _ in generate_response(_MESSAGES, cb):
+                    pass
+
+    assert cb.state == CircuitState.OPEN
 
 
 @pytest.mark.asyncio
