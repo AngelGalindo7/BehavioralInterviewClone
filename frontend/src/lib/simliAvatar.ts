@@ -1,19 +1,16 @@
-/**
- * Simli WebRTC avatar lifecycle manager (simli-client v3.x).
- *
- * v3 API differs significantly from older versions:
- *   - Named export `{ SimliClient }` (not default)
- *   - Positional constructor: (session_token, video, audio, iceServers, ...)
- *   - No `Initialize()` method — config goes via constructor
- *   - `ClearBuffer()` replaces the old `interrupt()`
- *   - `sendAudioDataImmediate()` bypasses the SDK's jitter buffer (use for the
- *     first chunk of each utterance so lip-sync starts immediately)
- *   - `sendAudioData()` is the buffered ingest path
- *   - `stop()` (not `close()`) tears down the WebRTC session
- *
- * The backend prepends one byte to every PCM frame to tell us which method to
- * call (see app/avatar/protocol.py): 0x01 → immediate, 0x00 → buffered.
- */
+// Not maintained — Simli is opt-in only. HeyGen/LiveAvatar is the active avatar.
+// To re-enable: set SIMLI_API_KEY + SIMLI_FACE_ID + AVATAR_PROVIDER=simli on the
+// backend. Re-validate PCM pacing and _drain_and_pace before production use.
+//
+// simli-client v3 API notes (differs significantly from older versions):
+//   - Named export { SimliClient } (not default)
+//   - Positional constructor: (session_token, video, audio, iceServers, ...)
+//   - No Initialize() method — config goes via constructor
+//   - ClearBuffer() replaces the old interrupt()
+//   - sendAudioDataImmediate() bypasses the SDK's jitter buffer (use for the
+//     first chunk of each utterance so lip-sync starts immediately)
+//   - sendAudioData() is the buffered ingest path
+//   - stop() (not close()) tears down the WebRTC session
 
 import { SimliClient } from "simli-client";
 import type { AvatarProvider, AvatarInitParams } from "./avatarProvider";

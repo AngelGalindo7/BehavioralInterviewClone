@@ -74,8 +74,8 @@ export default function InterviewPage() {
         const tokenData = await tokenResp.json();
         const sessionToken: string = tokenData.session_token;
         const iceServers: RTCIceServer[] = tokenData.ice_servers ?? [];
-        // HeyGen-only fields (undefined for Simli). url is the LiveKit URL;
-        // avatarSessionId routes streaming.task/stop on the backend.
+        // LiveAvatar-specific fields. url is the LiveKit room URL;
+        // avatarSessionId routes speak/stop calls on the backend WS.
         const url: string | undefined = tokenData.url;
         const avatarSessionId: string | undefined = tokenData.session_id;
         if (!sessionToken) throw new Error("Avatar session response missing session_token");
@@ -147,12 +147,10 @@ export default function InterviewPage() {
     }
   }, [avatarReady, wsStatus]);
 
-  // Tab-close cleanup. Without this, abandoned sessions linger as
-  // ended_at IS NULL rows and burn up to ~60s of Simli idle billing per
-  // session before Simli's own timeout kicks in. fetch keepalive (DELETE)
-  // is the modern replacement for navigator.sendBeacon — sendBeacon is
-  // POST-only, keepalive supports any verb and survives page unload.
-  // Backend has its own WS-finally and reaper safety nets if this fails.
+  // Tab-close cleanup: mark the session ended so the backend reaper doesn't
+  // wait the full session_max_age_seconds before closing. fetch keepalive
+  // (DELETE) survives page unload; sendBeacon is POST-only and cannot be used.
+  // Backend WS-finally and orphan reaper are secondary safety nets.
   useEffect(() => {
     if (!sessionId) return;
     const id = sessionId;
