@@ -1,3 +1,8 @@
+# Not maintained since 04/06/2026. HeyGen/LiveAvatar is the active avatar.
+# See docs/DECISION_LOG.md — "Avatar: standardise on HeyGen/LiveAvatar".
+# To re-enable: set SIMLI_API_KEY + SIMLI_FACE_ID in the env file and set
+# AVATAR_PROVIDER=simli. Re-validate against _drain_and_pace and PCM pacing.
+
 from typing import ClassVar
 
 import httpx
@@ -18,6 +23,9 @@ class SimliSessionProvider(AvatarSessionProvider):
         self._cb = cb
 
     async def get_session(self) -> dict:
+        # Guarded at registration time in deps.py; these are set if we're here.
+        assert settings.simli_api_key and settings.simli_face_id
+
         async def _fetch() -> dict:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 token_resp = await client.post(

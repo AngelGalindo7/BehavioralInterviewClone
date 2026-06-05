@@ -29,16 +29,21 @@ elevenlabs_cb = CircuitBreaker(
 # and vice versa. Provider names also appear in CB log lines for observability.
 def _build_avatar_providers() -> dict[str, "AvatarSessionProvider"]:
     from app.avatar.base import AvatarSessionProvider
-    from app.avatar.providers.simli import SimliSessionProvider
 
     providers: dict[str, AvatarSessionProvider] = {}
 
-    simli_cb = CircuitBreaker(
-        name="simli",
-        failure_threshold=settings.cb_failure_threshold,
-        recovery_timeout=settings.cb_recovery_timeout,
-    )
-    providers["simli"] = SimliSessionProvider(simli_cb)
+    # Simli is opt-in and not maintained since 04/06/2026. HeyGen is the active
+    # avatar. Register Simli only when credentials are explicitly set — same
+    # opt-in pattern as HeyGen — so deployments without Simli creds start cleanly.
+    if settings.simli_api_key and settings.simli_face_id:
+        from app.avatar.providers.simli import SimliSessionProvider
+
+        simli_cb = CircuitBreaker(
+            name="simli",
+            failure_threshold=settings.cb_failure_threshold,
+            recovery_timeout=settings.cb_recovery_timeout,
+        )
+        providers["simli"] = SimliSessionProvider(simli_cb)
 
     # HeyGen is opt-in: only register the provider if its required config is
     # set. Lets existing deployments without HeyGen credentials keep starting
@@ -82,7 +87,7 @@ def get_avatar_provider():
     """
     Default avatar provider, used when the caller doesn't specify ?provider=.
     Honors settings.avatar_provider when available; otherwise falls back to
-    whichever provider is registered (Simli is always registered).
+    whichever provider is registered first.
     """
     name = settings.avatar_provider
     if name in _avatar_providers:

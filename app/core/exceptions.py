@@ -19,4 +19,5 @@ class TTSError(BehavioralDummyError):
 
 
 class SimliError(BehavioralDummyError):
-    pass
+    """Raised by SimliSessionProvider. Provider is decommissioned (04/06/2026)
+    but the exception class is kept for symmetry should it be re-enabled."""

@@ -63,9 +63,10 @@ class Settings(BaseSettings):
     elevenlabs_greeting_stability: float = 0.20
     elevenlabs_greeting_style: float = 0.55
 
-    # Simli — v3 SDK uses /compose/token with these fields
-    simli_api_key: str
-    simli_face_id: str
+    # Simli WebRTC avatar — not maintained since 04/06/2026 (HeyGen is active).
+    # Set both to opt back in; provider is registered only when both are present.
+    simli_api_key: str | None = None
+    simli_face_id: str | None = None
     simli_model: str = "fasttalk"
     simli_max_session_length: int = 1800
     simli_max_idle_time: int = 60
@@ -87,10 +88,8 @@ class Settings(BaseSettings):
     pcm_chunk_bytes: int = 6000
     log_level: str = "INFO"
     environment: str = "production"
-    # HeyGen/LiveAvatar is the live target (see DECISION_LOG 04/06/2026). HeyGen
-    # is opt-in in deps.py (registered only when HEYGEN_API_KEY + HEYGEN_AVATAR_ID
-    # are set), so get_avatar_provider() falls back to Simli when those are absent
-    # — e.g. in tests/dev — which keeps the default harmless without HeyGen creds.
+    # HeyGen/LiveAvatar is the sole production avatar (DECISION_LOG 04/06/2026).
+    # Simli is decommissioned; this setting has no registered fallback provider.
     avatar_provider: str = "heygen"
 
     # Security
@@ -119,8 +118,7 @@ class Settings(BaseSettings):
 
     # Session lifecycle / cost caps.
     # session_max_age_seconds bounds both the server-side WS watchdog and the
-    # orphan reaper. Matches simli_max_session_length so an abandoned tab is
-    # cleaned up no later than Simli's own session timeout.
+    # orphan reaper (30 min).
     session_max_age_seconds: int = 1800
     session_reaper_interval_seconds: int = 300
     # Hard cap on transcripts per WS session — every accepted transcript bills
