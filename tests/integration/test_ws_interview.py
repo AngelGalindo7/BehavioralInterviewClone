@@ -283,6 +283,91 @@ async def test_ws_tts_path_streams_single_generation(auth_cookies):
 
 
 @pytest.mark.asyncio
+async def test_ws_tts_audio_pcm_server_paces_to_provider(auth_cookies):
+    """End-to-end cover for the HeyGen/LiveAvatar (audio_pcm_server) WS-TTS path —
+    the exact provider+mode combination whose mid-answer cut-off motivated
+    _drain_and_pace. A turn must drain the ElevenLabs WS to provider.send_pcm and
+    finalise with exactly one send_pcm_end after the audio drains."""
+    from app.config import settings
+
+    class _FakeServerProvider:
+        mode = "audio_pcm_server"
+
+        def __init__(self):
+            self.sent: list[tuple[str, int, bool]] = []
+            self.ended = 0
+
+        async def send_pcm(self, sid, pcm, *, is_first):
+            self.sent.append((sid, len(pcm), is_first))
+
+        async def send_pcm_end(self, sid):
+            self.ended += 1
+
+        async def interrupt(self, sid):
+            pass
+
+        async def close(self, sid):
+            pass
+
+    class _FakeWsSession:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def connect(self):
+            pass
+
+        async def feed(self, text):
+            pass
+
+        async def end(self):
+            pass
+
+        async def pcm(self):
+            yield bytes(6000)
+
+        async def close(self):
+            pass
+
+    async def _fake_generate(_messages, _cb):
+        yield "Here is my answer."
+
+    fake_provider = _FakeServerProvider()
+
+    with (
+        patch.object(settings, "tts_use_websocket", True),
+        patch("app.api.ws_interview.get_avatar_provider_by_name", return_value=fake_provider),
+        patch("app.api.ws_interview.WsTtsSession", _FakeWsSession),
+        patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
+        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
+        patch("app.api.ws_interview.Turn"),
+        patch("app.api.ws_interview.AsyncSessionLocal"),
+    ):
+        from app.main import create_app
+        app = create_app()
+
+        with TestClient(app, cookies=auth_cookies) as client:
+            session_id = str(uuid.uuid4())
+            url = (
+                f"/ws/interview?session_id={session_id}"
+                "&provider=heygen&avatar_session_id=sess-1"
+            )
+            with client.websocket_connect(url) as ws:
+                ws.send_text(json.dumps({"type": "transcript", "text": "Tell me about yourself."}))
+                for _ in range(60):
+                    if fake_provider.ended >= 1:
+                        break
+                    time.sleep(0.05)
+
+    assert fake_provider.sent, "send_pcm was never called on the audio_pcm_server provider"
+    assert fake_provider.ended == 1, "send_pcm_end must fire exactly once, after the audio drains"
+    first_sid, first_bytes, first_is_first = fake_provider.sent[0]
+    assert first_sid == "sess-1", "PCM must route to the handshake avatar_session_id"
+    assert first_is_first is True, "the first piece of the turn must carry is_first=True"
+    assert all(n % 2 == 0 for _, n, _ in fake_provider.sent), "every piece must be PCM16-aligned"
+
+
+@pytest.mark.asyncio
 async def test_oversized_text_frame_is_dropped(auth_cookies):
     """
     A text frame larger than max_ws_text_frame_bytes must be ignored — no JSON
