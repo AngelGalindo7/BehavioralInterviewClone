@@ -217,6 +217,72 @@ async def test_disconnect_cancels_in_flight_openai_stream(auth_cookies):
 
 
 @pytest.mark.asyncio
+async def test_ws_tts_path_streams_single_generation(auth_cookies):
+    """With tts_use_websocket on, a transcript routes through ONE WsTtsSession
+    (fed the LLM text, then ended and closed) and its PCM reaches the browser
+    with the 0x01 immediate prefix — the single-continuous-generation path."""
+    from app.config import settings
+
+    sessions: list = []
+
+    class _FakeWsSession:
+        def __init__(self, **_kwargs):
+            self.fed: list[str] = []
+            self.connected = self.ended = self.closed = False
+            sessions.append(self)
+
+        async def connect(self):
+            self.connected = True
+
+        async def feed(self, text):
+            self.fed.append(text)
+
+        async def end(self):
+            self.ended = True
+
+        async def pcm(self):
+            yield bytes(6000)
+
+        async def close(self):
+            self.closed = True
+
+    async def _fake_generate(_messages, _cb):
+        yield "Here is my answer."
+
+    with (
+        patch.object(settings, "tts_use_websocket", True),
+        patch("app.api.ws_interview.WsTtsSession", _FakeWsSession),
+        patch("app.api.ws_interview.generate_response", side_effect=_fake_generate),
+        patch("app.core.lifespan._verify_db_connection", new_callable=AsyncMock),
+        patch("app.core.lifespan._load_stories_from_db", new_callable=AsyncMock),
+        patch("app.api.ws_interview.Turn"),
+        patch("app.api.ws_interview.AsyncSessionLocal"),
+    ):
+        from app.main import create_app
+        app = create_app()
+
+        with TestClient(app, cookies=auth_cookies) as client:
+            session_id = str(uuid.uuid4())
+            received: list[bytes] = []
+            with client.websocket_connect(f"/ws/interview?session_id={session_id}") as ws:
+                ws.send_text(json.dumps({"type": "transcript", "text": "Tell me about yourself."}))
+                for _ in range(10):
+                    try:
+                        received.append(ws.receive_bytes())
+                        break
+                    except Exception:
+                        await asyncio.sleep(0.3)
+
+    assert received, "WS-TTS path produced no audio frames"
+    assert received[0][0:1] == b"\x01", "First WS-path chunk must carry the immediate-play prefix"
+    assert len(received[0]) == 1 + 6000
+    assert sessions, "WsTtsSession was never constructed"
+    only = sessions[0]
+    assert only.connected and only.ended and only.closed, "session lifecycle incomplete"
+    assert "".join(only.fed).strip() == "Here is my answer.", "LLM text was not fed to the WS session"
+
+
+@pytest.mark.asyncio
 async def test_oversized_text_frame_is_dropped(auth_cookies):
     """
     A text frame larger than max_ws_text_frame_bytes must be ignored — no JSON

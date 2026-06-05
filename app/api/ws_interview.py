@@ -47,7 +47,8 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from app.api.session import close_session_if_active
 from app.audio.chunker import iter_pcm_chunks
-from app.audio.tts import stream_tts_pcm
+from app.audio.tts import LATEST_HISTORY_SENTINEL, stream_tts_pcm
+from app.audio.tts_ws import WsTtsSession
 from app.avatar.base import AvatarSessionProvider
 from app.avatar.protocol import AUDIO_IMMEDIATE_PREFIX, AUDIO_NORMAL_PREFIX
 from app.avatar.providers.heygen import LIVEAVATAR_TTS_OUTPUT_FORMAT
@@ -358,6 +359,10 @@ async def _handle_transcript(
     is_text_mode = provider.mode == "text"
     is_pcm_server_mode = provider.mode == "audio_pcm_server"
     uses_elevenlabs = not is_text_mode
+    # One continuous ElevenLabs generation per turn (stream-input WS) vs the
+    # per-sentence HTTP flush path. Only meaningful when ElevenLabs is in play
+    # (text-mode providers bypass it entirely).
+    use_ws_tts = settings.tts_use_websocket and uses_elevenlabs
     tts_output_format = LIVEAVATAR_TTS_OUTPUT_FORMAT if is_pcm_server_mode else None
     t0 = time.monotonic()
     first_byte_logged = False
@@ -615,16 +620,125 @@ async def _handle_transcript(
             await _flush(current, next_text)
             current = nxt  # already dequeued — may be the None end sentinel
 
+    async def _run_ws_tts_turn() -> None:
+        # ElevenLabs stream-input: ONE continuous generation for the whole turn.
+        # Text is fed as the LLM produces it while PCM streams back concurrently,
+        # so the model conditions across the entire answer — no per-sentence
+        # generations, hence no inter-sentence prosodic seams. Feeds reuse the
+        # same clause/sentence splitter as the queue path for a low-latency first
+        # trigger; the audio side is a SINGLE iterator, so _send_audio_chunks'
+        # carry byte spans the whole turn and LiveAvatar gets one speak/speak_end.
+        nonlocal full_response, pending_text, first_byte_logged
+        nonlocal llm_first_token_t, llm_total_t, tts_first_chunk_t
+        nonlocal first_flush_start_t, last_flush_end_t
+        resolved_fmt = tts_output_format or settings.elevenlabs_output_format
+        session = WsTtsSession(
+            voice_id=settings.elevenlabs_voice_id,
+            model_id=settings.elevenlabs_model_id,
+            output_format=resolved_fmt,
+            voice_settings={
+                "stability": settings.elevenlabs_stability,
+                "similarity_boost": settings.elevenlabs_similarity_boost,
+                "style": settings.elevenlabs_style,
+                "use_speaker_boost": settings.elevenlabs_use_speaker_boost,
+            },
+        )
+        await elevenlabs_cb.check()
+        await session.connect()
+        got_audio = False
+
+        async def _feed() -> None:
+            nonlocal full_response, pending_text, llm_first_token_t, llm_total_t
+            first_fed = False
+            try:
+                async for delta in generate_response(messages, openai_cb):
+                    if llm_first_token_t is None:
+                        llm_first_token_t = time.monotonic()
+                    full_response += delta
+                    pending_text += delta
+                    if first_fed:
+                        to_feed, pending_text = _split_at_boundary(
+                            pending_text, settings.sentence_boundary_max_chars
+                        )
+                    else:
+                        to_feed, pending_text = _split_at_first_flush_boundary(
+                            pending_text, settings.first_flush_min_chars
+                        )
+                    if to_feed:
+                        first_fed = True
+                        await session.feed(to_feed)
+                llm_total_t = time.monotonic()
+                if pending_text.strip():
+                    await session.feed(pending_text.strip())
+            finally:
+                await session.end()
+
+        async def _pcm() -> AsyncIterator[bytes]:
+            nonlocal tts_first_chunk_t, got_audio, first_byte_logged
+            async for chunk in session.pcm():
+                if not chunk:
+                    continue
+                if tts_first_chunk_t is None:
+                    tts_first_chunk_t = time.monotonic()
+                got_audio = True
+                if not first_byte_logged:
+                    first_byte_logged = True
+                    log.info(
+                        "ttfb_first_byte",
+                        session_id=str(session_id),
+                        sequence=sequence,
+                        ttfb_ms=round((time.monotonic() - t0) * 1000, 1),
+                        mode=provider.mode,
+                    )
+                yield chunk
+
+        feed_task = asyncio.create_task(_feed())
+        first_flush_start_t = time.monotonic()
+        try:
+            if is_pcm_server_mode:
+                assert avatar_session_id is not None  # validated at WS handshake
+                is_first = True
+                async for tts_bytes in _pcm():
+                    await provider.send_pcm(
+                        avatar_session_id, tts_bytes, is_first=is_first
+                    )
+                    is_first = False
+                if got_audio:
+                    await provider.send_pcm_end(avatar_session_id)
+            else:
+                await _send_audio_chunks(websocket, _pcm(), first_chunk_state)
+            await feed_task  # surface any LLM/feed error after the audio drains
+            last_flush_end_t = time.monotonic()
+        finally:
+            if not feed_task.done():
+                feed_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await feed_task
+            await session.close()
+            # ZDR: one generation per turn → its history row is the most recent.
+            # Enqueue a single end-of-turn deletion whenever we produced audio (so
+            # a barge-in mid-answer still cleans up its partial row); a turn that
+            # produced NO audio does not enqueue, to avoid deleting an unrelated
+            # earlier turn. The WS protocol surfaces no per-generation id, so this
+            # uses the LATEST sentinel resolved by history_delete_worker.
+            if got_audio:
+                with contextlib.suppress(asyncio.QueueFull):
+                    history_queue.put_nowait(LATEST_HISTORY_SENTINEL)
+
     try:
-        await asyncio.gather(_llm_to_queue(), _flush_consumer())
-        # Finalise the LiveAvatar utterance exactly once, after every sentence
-        # flush has been streamed. A per-flush speak_end (the previous behaviour)
-        # made sentence N+1 interrupt sentence N mid-playback, so the avatar
-        # jumped from the opening sentence to a much later one. flush_index > 0
-        # guards the empty-response case (nothing was spoken, nothing to end).
-        if is_pcm_server_mode and flush_index > 0:
-            assert avatar_session_id is not None  # validated at WS handshake
-            await provider.send_pcm_end(avatar_session_id)
+        if use_ws_tts:
+            await _run_ws_tts_turn()
+        else:
+            await asyncio.gather(_llm_to_queue(), _flush_consumer())
+            # Finalise the LiveAvatar utterance exactly once, after every sentence
+            # flush has been streamed. A per-flush speak_end (the previous behaviour)
+            # made sentence N+1 interrupt sentence N mid-playback, so the avatar
+            # jumped from the opening sentence to a much later one. flush_index > 0
+            # guards the empty-response case (nothing was spoken, nothing to end).
+            # The WS path emits its own single speak_end inside _run_ws_tts_turn.
+            if is_pcm_server_mode and flush_index > 0:
+                assert avatar_session_id is not None  # validated at WS handshake
+                await provider.send_pcm_end(avatar_session_id)
         if uses_elevenlabs:
             await elevenlabs_cb.on_success()
     except asyncio.CancelledError:
