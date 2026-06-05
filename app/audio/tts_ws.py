@@ -48,6 +48,9 @@ log = structlog.get_logger(__name__)
 _DEFAULT_CHUNK_SCHEDULE = [50, 120, 160, 290]
 # PCM audio frames routinely exceed the websockets 1 MiB default frame cap.
 _MAX_FRAME_BYTES = 16 * 1024 * 1024
+# Headroom so a paced consumer (LiveAvatar throttles to real time) can buffer
+# generated audio instead of back-pressuring ElevenLabs into a slow-read stall.
+_MAX_RECV_QUEUE = 512
 
 
 class WsTtsSession:
@@ -89,6 +92,7 @@ class WsTtsSession:
         self._ws = await connect(
             self.url,
             max_size=_MAX_FRAME_BYTES,
+            max_queue=_MAX_RECV_QUEUE,
             open_timeout=settings.elevenlabs_first_chunk_timeout_s,
         )
         await self._ws.send(json.dumps({
