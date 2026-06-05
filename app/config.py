@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     # circuit breaker. Hang-prevention, not a latency target — keep it well
     # above the normal first-chunk time (turbo is usually < 1 s).
     elevenlabs_first_chunk_timeout_s: float = 6.0
+    # When true, synthesise each turn as ONE continuous ElevenLabs generation
+    # over the stream-input WebSocket (app/audio/tts_ws.py) instead of one HTTP
+    # request per sentence — eliminates inter-sentence prosodic seams. Off by
+    # default; the HTTP convert_as_stream path remains the fallback. The pinned
+    # SDK (1.9.0) has no WS method, so the protocol is hand-rolled — validate
+    # against the live API before enabling in prod.
+    tts_use_websocket: bool = False
+    elevenlabs_ws_base_url: str = "wss://api.elevenlabs.io"
     # Voice settings — taste knobs, tune by ear in a real session.
     # stability < 0.5 widens prosody range (less monotone) at the cost of more
     # take-to-take variability. style amplifies the voice's natural delivery;
