@@ -39,7 +39,7 @@ import random
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import structlog
 from elevenlabs import VoiceSettings
@@ -171,6 +171,73 @@ def _pacing_delay_s(
     if bytes_per_sec <= 0:
         return 0.0
     return max(0.0, (audio_bytes / bytes_per_sec) - elapsed_s - lead_s)
+
+
+async def _drain_and_pace(
+    pcm_iter: AsyncIterator[bytes],
+    send: Callable[[bytes, bool], Awaitable[None]],
+    *,
+    chunk_size: int,
+    bytes_per_sec: int,
+    lead_s: float,
+) -> None:
+    """
+    Forward a turn's PCM to a real-time PCM-server avatar (LiveAvatar), paced to
+    ~playback rate + lead_s, WITHOUT throttling the upstream ElevenLabs read.
+
+    A reader task drains ``pcm_iter`` as fast as ElevenLabs emits it into an
+    unbounded local queue; this coroutine pops and paces only the downstream
+    ``send``. The decoupling is the whole point: pacing the same loop that reads
+    ElevenLabs (the previous behaviour) made a slow, real-time read back-pressure
+    the stream-input WebSocket, so ElevenLabs dropped the connection mid-turn and
+    the avatar stopped partway through the answer. ElevenLabs stream-input must be
+    consumed as fast as it generates — pacing belongs at the avatar boundary only.
+
+    The queue is intentionally unbounded: a bound would block the reader on
+    ``put()`` once full, re-introducing the exact upstream back-pressure this
+    removes. A turn's audio is naturally bounded by ``openai_max_output_tokens``
+    (a few MB worst case), so unbounded buffering is safe for one user.
+
+    Re-chunks to ``chunk_size`` so no single agent.speak spans multiple seconds;
+    the provider's own carry byte keeps PCM16 samples aligned across pieces. A
+    reader error (e.g. TTSError from an ElevenLabs error frame) is re-raised after
+    the queue drains so the caller's circuit breaker still records the failure.
+    """
+    queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    async def _reader() -> None:
+        try:
+            async for tts_bytes in pcm_iter:
+                for piece in iter_pcm_chunks(tts_bytes, chunk_size):
+                    await queue.put(piece)
+        finally:
+            await queue.put(None)
+
+    reader_task = asyncio.create_task(_reader())
+    sent_bytes = 0
+    pace_start: float | None = None
+    is_first = True
+    try:
+        while True:
+            piece = await queue.get()
+            if piece is None:
+                break
+            await send(piece, is_first)
+            is_first = False
+            sent_bytes += len(piece)
+            if pace_start is None:
+                pace_start = time.monotonic()
+            delay = _pacing_delay_s(
+                sent_bytes, bytes_per_sec, time.monotonic() - pace_start, lead_s
+            )
+            if delay > 0:
+                await asyncio.sleep(delay)
+        await reader_task  # re-raise a reader error now the queue has drained
+    finally:
+        if not reader_task.done():
+            reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reader_task
 
 
 async def _send_audio_chunks(
@@ -727,32 +794,25 @@ async def _handle_transcript(
         try:
             if is_pcm_server_mode:
                 assert avatar_session_id is not None  # validated at WS handshake
-                # LiveAvatar lip-syncs in real time. The WS path generates the
-                # whole turn faster than real time, so pace delivery to ~playback
-                # rate (+ a lead buffer) instead of flooding — an unpaced burst
-                # overruns the avatar's buffer, dropping a chunk (skipped word)
-                # and drifting the lips. Re-chunk so no single agent.speak is
-                # multi-second; the provider's carry byte keeps samples aligned.
-                bytes_per_sec = _pcm_bytes_per_sec(resolved_fmt)
-                lead_s = settings.liveavatar_pacing_lead_s
-                sent_bytes = 0
-                pace_start: float | None = None
-                is_first = True
-                async for tts_bytes in _pcm():
-                    for piece in iter_pcm_chunks(tts_bytes, settings.pcm_chunk_bytes):
-                        await provider.send_pcm(
-                            avatar_session_id, piece, is_first=is_first
-                        )
-                        is_first = False
-                        sent_bytes += len(piece)
-                        if pace_start is None:
-                            pace_start = time.monotonic()
-                        delay = _pacing_delay_s(
-                            sent_bytes, bytes_per_sec,
-                            time.monotonic() - pace_start, lead_s,
-                        )
-                        if delay > 0:
-                            await asyncio.sleep(delay)
+                pcm_session_id = avatar_session_id  # narrowed str for the closure
+
+                async def _send_piece(piece: bytes, is_first: bool) -> None:
+                    await provider.send_pcm(
+                        pcm_session_id, piece, is_first=is_first
+                    )
+
+                # LiveAvatar lip-syncs in real time, so pace delivery to ~playback
+                # rate + lead — but drain ElevenLabs at full speed underneath (see
+                # _drain_and_pace). Pacing the read itself back-pressures the
+                # stream-input WS and ElevenLabs drops it mid-turn, stopping the
+                # avatar partway through the answer.
+                await _drain_and_pace(
+                    _pcm(),
+                    _send_piece,
+                    chunk_size=settings.pcm_chunk_bytes,
+                    bytes_per_sec=_pcm_bytes_per_sec(resolved_fmt),
+                    lead_s=settings.liveavatar_pacing_lead_s,
+                )
                 if got_audio:
                     await provider.send_pcm_end(avatar_session_id)
             else:
