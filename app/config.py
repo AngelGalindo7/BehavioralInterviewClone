@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # against the live API before enabling in prod.
     tts_use_websocket: bool = False
     elevenlabs_ws_base_url: str = "wss://api.elevenlabs.io"
+    # LiveAvatar (audio_pcm_server) lip-syncs in real time, so the WS path must
+    # not flood it: it delivers audio paced to ~playback rate plus this lead
+    # buffer (seconds of audio allowed ahead of real time). Too low → underruns/
+    # choppiness; too high → the avatar drifts behind and can drop chunks on
+    # overrun. Only applies to the WS-TTS LiveAvatar path; Simli buffers in the
+    # browser and needs no server-side pacing.
+    liveavatar_pacing_lead_s: float = 0.5
     # Voice settings — taste knobs, tune by ear in a real session.
     # stability < 0.5 widens prosody range (less monotone) at the cost of more
     # take-to-take variability. style amplifies the voice's natural delivery;

@@ -147,6 +147,32 @@ def _split_at_first_flush_boundary(text: str, min_chars: int) -> tuple[str, str]
     return text[:end], text[end:].lstrip()
 
 
+def _pcm_bytes_per_sec(output_format: str) -> int:
+    """Bytes/sec for a 16-bit mono PCM format string like 'pcm_24000'."""
+    try:
+        rate = int(output_format.split("_")[1])
+    except (IndexError, ValueError):
+        rate = 24000
+    return rate * 2
+
+
+def _pacing_delay_s(
+    audio_bytes: int, bytes_per_sec: int, elapsed_s: float, lead_s: float
+) -> float:
+    """
+    Seconds to sleep so cumulative audio delivery tracks real-time playback plus
+    a fixed lead buffer; 0 until we are more than lead_s ahead.
+
+    LiveAvatar lip-syncs in real time, so forwarding a whole turn's audio as fast
+    as ElevenLabs emits it (the WS path) overruns its buffer — it drops a chunk
+    (audible as a skipped word) and the mouth drifts out of sync. Pacing to
+    playback rate + lead keeps the avatar fed without flooding it.
+    """
+    if bytes_per_sec <= 0:
+        return 0.0
+    return max(0.0, (audio_bytes / bytes_per_sec) - elapsed_s - lead_s)
+
+
 async def _send_audio_chunks(
     websocket: WebSocket,
     pcm_iter: AsyncIterator[bytes],
@@ -649,6 +675,7 @@ async def _handle_transcript(
 
         async def _feed() -> None:
             nonlocal full_response, pending_text, llm_first_token_t, llm_total_t
+            nonlocal first_flush_start_t
             first_fed = False
             try:
                 async for delta in generate_response(messages, openai_cb):
@@ -665,10 +692,14 @@ async def _handle_transcript(
                             pending_text, settings.first_flush_min_chars
                         )
                     if to_feed:
+                        if first_flush_start_t is None:
+                            first_flush_start_t = time.monotonic()
                         first_fed = True
                         await session.feed(to_feed)
                 llm_total_t = time.monotonic()
                 if pending_text.strip():
+                    if first_flush_start_t is None:
+                        first_flush_start_t = time.monotonic()
                     await session.feed(pending_text.strip())
             finally:
                 await session.end()
@@ -693,16 +724,35 @@ async def _handle_transcript(
                 yield chunk
 
         feed_task = asyncio.create_task(_feed())
-        first_flush_start_t = time.monotonic()
         try:
             if is_pcm_server_mode:
                 assert avatar_session_id is not None  # validated at WS handshake
+                # LiveAvatar lip-syncs in real time. The WS path generates the
+                # whole turn faster than real time, so pace delivery to ~playback
+                # rate (+ a lead buffer) instead of flooding — an unpaced burst
+                # overruns the avatar's buffer, dropping a chunk (skipped word)
+                # and drifting the lips. Re-chunk so no single agent.speak is
+                # multi-second; the provider's carry byte keeps samples aligned.
+                bytes_per_sec = _pcm_bytes_per_sec(resolved_fmt)
+                lead_s = settings.liveavatar_pacing_lead_s
+                sent_bytes = 0
+                pace_start: float | None = None
                 is_first = True
                 async for tts_bytes in _pcm():
-                    await provider.send_pcm(
-                        avatar_session_id, tts_bytes, is_first=is_first
-                    )
-                    is_first = False
+                    for piece in iter_pcm_chunks(tts_bytes, settings.pcm_chunk_bytes):
+                        await provider.send_pcm(
+                            avatar_session_id, piece, is_first=is_first
+                        )
+                        is_first = False
+                        sent_bytes += len(piece)
+                        if pace_start is None:
+                            pace_start = time.monotonic()
+                        delay = _pacing_delay_s(
+                            sent_bytes, bytes_per_sec,
+                            time.monotonic() - pace_start, lead_s,
+                        )
+                        if delay > 0:
+                            await asyncio.sleep(delay)
                 if got_audio:
                     await provider.send_pcm_end(avatar_session_id)
             else:
