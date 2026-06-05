@@ -87,7 +87,11 @@ class Settings(BaseSettings):
     pcm_chunk_bytes: int = 6000
     log_level: str = "INFO"
     environment: str = "production"
-    avatar_provider: str = "simli"
+    # HeyGen/LiveAvatar is the live target (see DECISION_LOG 04/06/2026). HeyGen
+    # is opt-in in deps.py (registered only when HEYGEN_API_KEY + HEYGEN_AVATAR_ID
+    # are set), so get_avatar_provider() falls back to Simli when those are absent
+    # — e.g. in tests/dev — which keeps the default harmless without HeyGen creds.
+    avatar_provider: str = "heygen"
 
     # Security
     frontend_origin: str = "http://localhost:5173"
