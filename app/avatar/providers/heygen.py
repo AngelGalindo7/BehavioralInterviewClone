@@ -30,6 +30,7 @@ first-message auth.
 """
 import asyncio
 import base64
+import contextlib
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -62,6 +63,11 @@ class _SessionState:
     ws_url: str
     ws: ClientConnection | None = None
     ws_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Background task that drains inbound agent.* frames for the socket's
+    # lifetime (see _drain_ws). Bound to the current ws; cancelled and recreated
+    # on every reconnect. Without it the receive queue fills and the server
+    # back-pressure-closes the connection mid-answer.
+    reader_task: asyncio.Task | None = None
     # Orphaned first byte of a PCM16 sample when ElevenLabs emits an odd-length
     # chunk; prepended to the next chunk so each agent.speak event contains only
     # complete 2-byte samples. Reset to b"" on every send_pcm_end.
@@ -167,6 +173,8 @@ class HeyGenSessionProvider(AvatarSessionProvider):
             # Connection was closed by the remote (keepalive timeout) — reconnect.
             if state.ws is not None:
                 log.info("liveavatar_ws_reconnecting", reason="keepalive timeout or remote close")
+            # Tear down the drain reader bound to the dead socket before replacing it.
+            await self._stop_reader(state)
             state.ws = None
             sep = "&" if "?" in state.ws_url else "?"
             url = f"{state.ws_url}{sep}token={state.session_token}"
@@ -174,8 +182,40 @@ class HeyGenSessionProvider(AvatarSessionProvider):
             # pings, so the default 20s ping causes our client to close the connection
             # with 1011 after every idle gap between turns.
             state.ws = await ws_connect(url, max_size=2 * 1024 * 1024, ping_interval=None)
+            # LiveAvatar streams agent.* status frames back on this same socket.
+            # Nothing consumes them, so without an active reader the websockets
+            # receive queue fills (default 32), the client stops draining TCP, the
+            # server's writes block and it closes us — observed in prod as a
+            # reconnect storm (~4/s) on long answers that drops paced audio
+            # mid-utterance (lip-sync drift, then the avatar freezes). The drain
+            # task keeps the queue empty and lets close frames be observed so
+            # state.ws.state stays truthful for the fast-path check above.
+            state.reader_task = asyncio.create_task(self._drain_ws(state.ws))
             log.info("liveavatar_ws_connected", ws_url_host=state.ws_url.split("?")[0])
             return state.ws
+
+    @staticmethod
+    async def _drain_ws(ws: ClientConnection) -> None:
+        """Consume and discard inbound agent.* frames for the socket's lifetime.
+
+        websockets permits one concurrent reader and send_pcm only ever sends,
+        so this never contends. We act on none of LiveAvatar's status events
+        today, so they're dropped — the sole purpose is to keep the receive
+        queue empty so the server never back-pressure-closes us. Exits quietly
+        when the socket closes.
+        """
+        try:
+            async for _ in ws:
+                pass
+        except (ConnectionClosed, WebSocketException, OSError):
+            pass
+
+    async def _stop_reader(self, state: _SessionState) -> None:
+        task, state.reader_task = state.reader_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     async def send_pcm(self, avatar_session_id: str, pcm: bytes, *, is_first: bool) -> None:
         # is_first is accepted for symmetry with the frontend PCM sink but
@@ -287,6 +327,7 @@ class HeyGenSessionProvider(AvatarSessionProvider):
         if state is None:
             return
 
+        await self._stop_reader(state)
         if state.ws is not None:
             try:
                 await state.ws.close()
