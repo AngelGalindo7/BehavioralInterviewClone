@@ -10,7 +10,7 @@
 set -euo pipefail
 exec > /var/log/behavioral-dummy-bootstrap.log 2>&1
 
-REPO_URL="https://github.com/AngelGalindo7/MasterTheBehavioralInterview.git"
+REPO_URL="https://github.com/AngelGalindo7/BehavioralInterviewClone.git"
 APP_DIR="/home/ubuntu/MasterTheBehavioralInterview"
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting cloud-init bootstrap..."
