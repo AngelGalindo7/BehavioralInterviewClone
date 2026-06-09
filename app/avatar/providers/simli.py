@@ -26,11 +26,13 @@ class SimliSessionProvider(AvatarSessionProvider):
         # Guarded at registration time in deps.py; these are set if we're here.
         assert settings.simli_api_key and settings.simli_face_id
 
+        api_key: str = settings.simli_api_key
+
         async def _fetch() -> dict:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 token_resp = await client.post(
                     _TOKEN_URL,
-                    headers={"x-simli-api-key": settings.simli_api_key},
+                    headers={"x-simli-api-key": api_key},
                     json={
                         "faceId": settings.simli_face_id,
                         "handleSilence": True,
@@ -44,7 +46,7 @@ class SimliSessionProvider(AvatarSessionProvider):
 
                 ice_resp = await client.get(
                     _ICE_URL,
-                    headers={"x-simli-api-key": settings.simli_api_key},
+                    headers={"x-simli-api-key": api_key},
                 )
                 ice_resp.raise_for_status()
                 ice_servers = ice_resp.json()
