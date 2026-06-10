@@ -54,7 +54,9 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
-  # ── Integration tests (requires live pgvector Postgres) ──────────────────────
+  # ── Integration tests — real FastAPI app + WebSocket pipeline ────────────────
+  # External boundaries (OpenAI, ElevenLabs, HeyGen, database) are mocked, so no
+  # live services are needed: these exercise our own wiring, not third parties.
   integration:
     name: Backend — integration tests
     runs-on: ubuntu-latest
@@ -63,21 +65,8 @@ jobs:
     permissions:
       contents: read
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+    # Placeholder config so Pydantic settings validate at import time. Nothing
+    # here is dialled — every external call is mocked inside the tests.
     env:
       DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
       OPENAI_API_KEY: sk-test
